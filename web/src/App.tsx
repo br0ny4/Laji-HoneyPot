@@ -1,7 +1,44 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 
 type Tab = 'dashboard' | 'honeypot' | 'traceability' | 'ops'
+
+const API_BASE = '/api'
+
+interface Stats {
+  active_services: number
+  today_conns: number
+  attackers: number
+  counter_hits: number
+}
+
+interface Connection {
+  id: number
+  timestamp: string
+  remote_ip: string
+  port: number
+  service: string
+  user_agent: string
+}
+
+interface AttackEvent {
+  id: number
+  timestamp: string
+  remote_ip: string
+  path: string
+  tool_name: string
+  payload: string
+}
+
+interface VulnEntry {
+  id: string
+  tool: string
+  title: string
+  description: string
+  severity: string
+  cve: string
+  exploit: string
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard')
@@ -10,7 +47,7 @@ function App() {
     <div className="app">
       <header className="app-header">
         <h1>Laji-HoneyPot</h1>
-        <span className="version">v0.1.0</span>
+        <span className="version">v0.2.0</span>
       </header>
 
       <nav className="tab-nav">
@@ -41,27 +78,64 @@ function App() {
 }
 
 function Dashboard() {
+  const [stats, setStats] = useState<Stats>({ active_services: 4, today_conns: 0, attackers: 0, counter_hits: 0 })
+  const [connections, setConnections] = useState<Connection[]>([])
+
+  useEffect(() => {
+    fetch(`${API_BASE}/stats`)
+      .then(r => r.json())
+      .then(setStats)
+      .catch(() => {})
+
+    fetch(`${API_BASE}/connections?limit=10`)
+      .then(r => r.json())
+      .then(d => setConnections(d.connections || []))
+      .catch(() => {})
+  }, [])
+
   return (
     <div className="panel">
       <h2>仪表盘</h2>
       <div className="stats-grid">
         <div className="stat-card">
           <h3>活跃蜜罐</h3>
-          <p className="stat-value">4</p>
+          <p className="stat-value">{stats.active_services}</p>
         </div>
         <div className="stat-card">
           <h3>今日连接</h3>
-          <p className="stat-value">--</p>
+          <p className="stat-value">{stats.today_conns}</p>
         </div>
         <div className="stat-card">
           <h3>已识别攻击者</h3>
-          <p className="stat-value">--</p>
+          <p className="stat-value">{stats.attackers}</p>
         </div>
         <div className="stat-card">
-          <h3>反制成功</h3>
-          <p className="stat-value">--</p>
+          <h3>反制事件</h3>
+          <p className="stat-value">{stats.counter_hits}</p>
         </div>
       </div>
+
+      {connections.length > 0 && (
+        <div className="section">
+          <h3>最近连接</h3>
+          <table>
+            <thead>
+              <tr><th>时间</th><th>来源 IP</th><th>端口</th><th>服务</th><th>User-Agent</th></tr>
+            </thead>
+            <tbody>
+              {connections.map(c => (
+                <tr key={c.id}>
+                  <td>{new Date(c.timestamp).toLocaleTimeString()}</td>
+                  <td>{c.remote_ip}</td>
+                  <td>{c.port}</td>
+                  <td>{c.service}</td>
+                  <td title={c.user_agent}>{(c.user_agent || '').substring(0, 40)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -86,26 +160,79 @@ function HoneypotPanel() {
 }
 
 function TraceabilityPanel() {
+  const [vulns, setVulns] = useState<VulnEntry[]>([])
+  const [attacks, setAttacks] = useState<AttackEvent[]>([])
+
+  useEffect(() => {
+    fetch(`${API_BASE}/vulns`)
+      .then(r => r.json())
+      .then(d => setVulns(d.vulns || []))
+      .catch(() => {})
+
+    fetch(`${API_BASE}/attacks?limit=20`)
+      .then(r => r.json())
+      .then(d => setAttacks(d.attacks || []))
+      .catch(() => {})
+  }, [])
+
+  const sevClass = (s: string) => {
+    switch (s) {
+      case 'critical': return 'severity-critical'
+      case 'high': return 'severity-high'
+      case 'medium': return 'severity-medium'
+      default: return 'severity-low'
+    }
+  }
+
+  const toolTag = (tool: string) => {
+    const browsers = ['chrome', 'firefox', 'safari', 'edge']
+    return browsers.includes(tool) ? '浏览器' : '红队工具'
+  }
+
   return (
     <div className="panel">
       <h2>溯源反制</h2>
+
+      {attacks.length > 0 && (
+        <div className="section">
+          <h3>面包屑触发事件（{attacks.length}）</h3>
+          <table>
+            <thead>
+              <tr><th>时间</th><th>来源 IP</th><th>触发路径</th><th>工具</th></tr>
+            </thead>
+            <tbody>
+              {attacks.map(a => (
+                <tr key={a.id}>
+                  <td>{new Date(a.timestamp).toLocaleTimeString()}</td>
+                  <td>{a.remote_ip}</td>
+                  <td className="severity-critical">{a.path}</td>
+                  <td>{a.tool_name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="section">
-        <h3>漏洞数据库（预置 7 条）</h3>
+        <h3>漏洞数据库（{vulns.length} 条）</h3>
         <table>
           <thead>
             <tr><th>ID</th><th>目标工具</th><th>严重程度</th><th>类型</th></tr>
           </thead>
           <tbody>
-            <tr><td>CVE-2022-39197</td><td>Cobalt Strike</td><td className="severity-critical">严重</td><td>红队工具</td></tr>
-            <tr><td>BD-2023-001</td><td>冰蝎</td><td className="severity-high">高危</td><td>红队工具</td></tr>
-            <tr><td>BS-2024-001</td><td>Burp Suite</td><td className="severity-medium">中危</td><td>红队工具</td></tr>
-            <tr><td>CVE-2024-0519</td><td>Chrome</td><td className="severity-critical">严重</td><td>浏览器</td></tr>
-            <tr><td>CH-2024-001</td><td>Chrome/Firefox</td><td className="severity-medium">中危</td><td>浏览器</td></tr>
-            <tr><td>FF-2024-001</td><td>Firefox</td><td className="severity-low">低危</td><td>浏览器</td></tr>
-            <tr><td>CVE-2023-32784</td><td>SQLMap</td><td className="severity-low">低危</td><td>红队工具</td></tr>
+            {vulns.map(v => (
+              <tr key={v.id}>
+                <td>{v.id}</td>
+                <td>{v.tool}</td>
+                <td className={sevClass(v.severity)}>{v.severity}</td>
+                <td>{toolTag(v.tool)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+
       <div className="section">
         <h3>反制能力</h3>
         <table>
@@ -141,8 +268,8 @@ function OpsPanel() {
         </table>
       </div>
       <div className="section">
-        <h3>竞品调研</h3>
-        <p>自动检索 GitHub topic:honeypot，按 Stars 排序，标注溯源能力、协议支持、容器化。</p>
+        <h3>数据持久化</h3>
+        <p>SQLite 存储连接日志、攻击事件、指纹数据，数据目录 ./data</p>
       </div>
     </div>
   )

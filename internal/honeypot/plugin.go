@@ -1,11 +1,13 @@
 package honeypot
 
 import (
+	"encoding/json"
 	"net"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
+	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 	httpSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/http"
 	mysqlSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/mysql"
 	redisSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/redis"
@@ -19,14 +21,16 @@ type Engine struct {
 	plugin.Base
 	logger *log.Logger
 	bus    *bus.Bus
+	store  *store.Store
 	stack  *tcpstack.Stack
 }
 
 // NewEngine 创建蜜罐引擎
-func NewEngine(logger *log.Logger, bus *bus.Bus) *Engine {
+func NewEngine(logger *log.Logger, bus *bus.Bus, st *store.Store) *Engine {
 	return &Engine{
 		logger: logger,
 		bus:    bus,
+		store:  st,
 		stack:  tcpstack.New(logger),
 	}
 }
@@ -47,10 +51,34 @@ func (e *Engine) Init(cfg config.Section) error {
 		name    string
 		handler func(net.Conn)
 	}{
-		{port: cfg.GetInt("http_port"), name: "HTTP", handler: func(c net.Conn) { httpSrv.Handle(c) }},
-		{port: cfg.GetInt("mysql_port"), name: "MySQL", handler: func(c net.Conn) { mysqlSrv.Handle(c) }},
-		{port: cfg.GetInt("redis_port"), name: "Redis", handler: func(c net.Conn) { redisSrv.Handle(c) }},
-		{port: cfg.GetInt("ssh_port"), name: "SSH", handler: func(c net.Conn) { sshSrv.Handle(c) }},
+		{
+			port: cfg.GetInt("http_port"),
+			name: "HTTP",
+			handler: e.wrapHandler("HTTP", func(c net.Conn) {
+				httpSrv.Handle(c, e.onBreadcrumb)
+			}),
+		},
+		{
+			port: cfg.GetInt("mysql_port"),
+			name: "MySQL",
+			handler: e.wrapHandler("MySQL", func(c net.Conn) {
+				mysqlSrv.Handle(c)
+			}),
+		},
+		{
+			port: cfg.GetInt("redis_port"),
+			name: "Redis",
+			handler: e.wrapHandler("Redis", func(c net.Conn) {
+				redisSrv.Handle(c)
+			}),
+		},
+		{
+			port: cfg.GetInt("ssh_port"),
+			name: "SSH",
+			handler: e.wrapHandler("SSH", func(c net.Conn) {
+				sshSrv.Handle(c)
+			}),
+		},
 	}
 
 	for _, s := range ports {
@@ -63,6 +91,52 @@ func (e *Engine) Init(cfg config.Section) error {
 	}
 
 	return nil
+}
+
+// wrapHandler 包裹 handler，自动记录连接日志、发布事件
+func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Conn) {
+	return func(conn net.Conn) {
+		remote := conn.RemoteAddr().String()
+		host, port, _ := net.SplitHostPort(remote)
+		portNum := 0
+		if p, err := net.LookupPort("tcp", port); err == nil {
+			portNum = p
+		}
+
+		// 记录连接到数据库
+		e.store.RecordConnection(host, portNum, service, "")
+
+		// 发布连接事件到事件总线
+		evtData, _ := json.Marshal(map[string]interface{}{
+			"remote_ip": host,
+			"port":      portNum,
+			"service":   service,
+		})
+		e.bus.Publish("honeypot.connection", evtData)
+
+		// 执行实际 handler
+		handler(conn)
+	}
+}
+
+// onBreadcrumb HTTP 面包屑触发回调
+func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
+	e.logger.Warnw("BREADCRUMB TRIGGERED",
+		"remote", remoteIP,
+		"path", path,
+		"ua", userAgent,
+	)
+
+	// 记录攻击事件到数据库
+	e.store.RecordAttack(remoteIP, path, "unknown", userAgent)
+
+	// 发布事件到总线
+	evtData, _ := json.Marshal(map[string]interface{}{
+		"remote_ip":  remoteIP,
+		"path":       path,
+		"user_agent": userAgent,
+	})
+	e.bus.Publish("honeypot.attack", evtData)
 }
 
 func (e *Engine) Start() error {

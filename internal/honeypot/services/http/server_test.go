@@ -19,7 +19,7 @@ func startTestServer(t *testing.T, srv *Server) (string, net.Listener) {
 	go func() {
 		for {
 			conn, _ := ln.Accept()
-			srv.Handle(conn)
+			srv.Handle(conn, nil)
 		}
 	}()
 	time.Sleep(30 * time.Millisecond)
@@ -38,8 +38,9 @@ func TestHTTPHoneypotRoot(t *testing.T) {
 
 	go func() {
 		conn, _ := ln.Accept()
-		srv.Handle(conn)
+		srv.Handle(conn, nil)
 	}()
+
 
 	time.Sleep(30 * time.Millisecond)
 
@@ -73,7 +74,7 @@ func TestAdminLoginPage(t *testing.T) {
 
 	go func() {
 		conn, _ := ln.Accept()
-		srv.Handle(conn)
+		srv.Handle(conn, nil)
 	}()
 
 	time.Sleep(30 * time.Millisecond)

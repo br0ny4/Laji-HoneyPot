@@ -38,8 +38,12 @@ func New(logger *log.Logger) *Server {
 	}
 }
 
-// Handle 处理一个 TCP 连接，模拟 HTTP 交互
-func (s *Server) Handle(conn net.Conn) {
+// BreadcrumbCallback 面包屑触发回调
+type BreadcrumbCallback func(remoteIP, path, userAgent string)
+
+// Handle 处理一个 TCP 连接，模拟 HTTP 交互。
+// onBreadcrumb 为面包屑触发回调，传入 nil 时不触发。
+func (s *Server) Handle(conn net.Conn, onBreadcrumb BreadcrumbCallback) {
 	defer conn.Close()
 
 	remote := conn.RemoteAddr().String()
@@ -79,6 +83,9 @@ func (s *Server) Handle(conn net.Conn) {
 				"path", path,
 				"user-agent", ua,
 			)
+			if onBreadcrumb != nil {
+				onBreadcrumb(remote, path, ua)
+			}
 		}
 
 		resp := s.buildResponse(path, headers)
