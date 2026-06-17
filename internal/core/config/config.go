@@ -1,0 +1,99 @@
+package config
+
+import (
+	"os"
+	"strconv"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config 顶层配置结构
+type Config struct {
+	LogLevel string             `yaml:"log_level"`
+	Plugins  map[string]Section `yaml:"plugins"`
+	APIAddr  string             `yaml:"api_addr"`
+	DataDir  string             `yaml:"data_dir"`
+}
+
+// Section 插件级配置，支持任意键值对
+type Section map[string]any
+
+// Load 从默认路径加载配置。YAML 文件 + 环境变量覆盖。
+func Load(paths ...string) (*Config, error) {
+	cfg := &Config{
+		LogLevel: "info",
+		APIAddr:  ":8080",
+		DataDir:  "./data",
+		Plugins:  make(map[string]Section),
+	}
+
+	p := "config.yaml"
+	if len(paths) > 0 {
+		p = paths[0]
+	}
+
+	data, err := os.ReadFile(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			applyEnvOverrides(cfg)
+			return cfg, nil // 无配置文件时使用默认值
+		}
+		return nil, err
+	}
+
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, err
+	}
+
+	applyEnvOverrides(cfg)
+	return cfg, nil
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("HP_LOG_LEVEL"); v != "" {
+		cfg.LogLevel = v
+	}
+	if v := os.Getenv("HP_API_ADDR"); v != "" {
+		cfg.APIAddr = v
+	}
+	if v := os.Getenv("HP_DATA_DIR"); v != "" {
+		cfg.DataDir = v
+	}
+}
+
+// Get 从 Section 中安全获取字符串值
+func (s Section) Get(key string) string {
+	v, ok := s[key]
+	if !ok {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case int:
+		return strconv.Itoa(val)
+	case bool:
+		return strconv.FormatBool(val)
+	default:
+		return ""
+	}
+}
+
+// GetInt 从 Section 中安全获取 int 值
+func (s Section) GetInt(key string) int {
+	v, ok := s[key]
+	if !ok {
+		return 0
+	}
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	case string:
+		n, _ := strconv.Atoi(val)
+		return n
+	default:
+		return 0
+	}
+}

@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build multi-platform binaries
+        run: |
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o honeypot-linux-amd64 ./cmd/honeypot/
+          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o honeypot-linux-arm64 ./cmd/honeypot/
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o honeypot-darwin-amd64 ./cmd/honeypot/
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o honeypot-darwin-arm64 ./cmd/honeypot/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            honeypot-linux-amd64
+            honeypot-linux-arm64
+            honeypot-darwin-amd64
+            honeypot-darwin-arm64
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

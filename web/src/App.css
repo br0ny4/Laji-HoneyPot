@@ -1,0 +1,34 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+
+.app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.app-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1e293b; }
+.app-header h1 { font-size: 24px; color: #38bdf8; }
+.version { font-size: 12px; color: #64748b; }
+
+.tab-nav { display: flex; gap: 4px; margin-bottom: 24px; background: #1e293b; border-radius: 8px; padding: 4px; }
+.tab-btn { padding: 8px 20px; border: none; border-radius: 6px; background: transparent; color: #94a3b8; cursor: pointer; font-size: 14px; }
+.tab-btn.active { background: #38bdf8; color: #0f172a; }
+.tab-btn:hover:not(.active) { color: #e2e8f0; }
+
+.content { background: #1e293b; border-radius: 12px; padding: 24px; min-height: 400px; }
+.panel h2 { font-size: 20px; margin-bottom: 16px; color: #f1f5f9; }
+.panel h3 { font-size: 16px; margin-bottom: 12px; color: #cbd5e1; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card { background: #0f172a; border-radius: 8px; padding: 20px; border: 1px solid #334155; }
+.stat-card h3 { font-size: 13px; color: #64748b; margin-bottom: 8px; }
+.stat-value { font-size: 28px; font-weight: 700; color: #38bdf8; }
+
+table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #334155; font-size: 14px; }
+th { color: #64748b; font-weight: 600; }
+
+.status-online { color: #4ade80; }
+.severity-critical { color: #ef4444; font-weight: 600; }
+.severity-high { color: #f97316; font-weight: 600; }
+.severity-medium { color: #eab308; }
+.severity-low { color: #94a3b8; }
+
+.section { margin-bottom: 24px; }
+.section p { font-size: 14px; color: #94a3b8; }

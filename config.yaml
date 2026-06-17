@@ -1,0 +1,17 @@
+log_level: info
+api_addr: ":8080"
+data_dir: "./data"
+
+plugins:
+  honeypot-engine:
+    enabled: true
+    http_port: 8081
+    mysql_port: 3306
+    redis_port: 6379
+    ssh_port: 2222
+    tls_fingerprint: "nginx-1.24"
+  traceability-engine:
+    enabled: true
+    update_interval: "24h"
+  ops-engine:
+    enabled: true
