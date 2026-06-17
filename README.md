@@ -1,4 +1,4 @@
-# Laji-HoneyPot
+# Laji-HoneyPot（辣鸡蜜罐）
 
 <img src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=A%20dark%20themed%20cybersecurity%20logo%20for%20a%20honeypot%20project%20named%20Laji-HoneyPot%20featuring%20a%20honeycomb%20with%20a%20digital%20circuit%20pattern%20inside%20glowing%20blue%20and%20red%20accents&image_size=square_hd" alt="Laji-HoneyPot" width="200" />
 
