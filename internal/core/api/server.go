@@ -16,15 +16,17 @@ type Server struct {
 	logger *log.Logger
 	store  *store.Store
 	vulnDB *vulndb.DB
+	wsHub  *WSHub
 	mux    *http.ServeMux
 }
 
 // NewServer 创建 API 服务器
-func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB) *Server {
+func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub) *Server {
 	s := &Server{
 		logger: logger,
 		store:  st,
 		vulnDB: vdb,
+		wsHub:  hub,
 		mux:    http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -42,6 +44,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
 	// 健康检查
 	s.mux.HandleFunc("/healthz", s.handleHealth)
+	// 实时推送(SSE)
+	s.mux.HandleFunc("/api/events", s.wsHub.ServeWS)
 }
 
 // Handler 返回带 CORS 的 http.Handler

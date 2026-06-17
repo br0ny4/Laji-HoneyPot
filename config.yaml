@@ -9,6 +9,9 @@ plugins:
     mysql_port: 3306
     redis_port: 6379
     ssh_port: 2222
+    ftp_port: 2121
+    ldap_port: 3890
+    dns_port: 5354
     tls_fingerprint: "nginx-1.24"
   traceability-engine:
     enabled: true

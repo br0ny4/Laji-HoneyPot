@@ -21,7 +21,7 @@ func TestAPIStats(t *testing.T) {
 	st.RecordConnection("10.0.0.2", 3306, "MySQL", "")
 
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb)
+	srv := NewServer(log.New("info"), st, vdb, nil)
 
 	req := httptest.NewRequest("GET", "/api/stats", nil)
 	w := httptest.NewRecorder()
@@ -47,7 +47,7 @@ func TestAPIConnections(t *testing.T) {
 
 	st.RecordConnection("10.0.0.1", 8081, "HTTP", "Go-http-client")
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb)
+	srv := NewServer(log.New("info"), st, vdb, nil)
 
 	req := httptest.NewRequest("GET", "/api/connections?limit=10", nil)
 	w := httptest.NewRecorder()
@@ -68,7 +68,7 @@ func TestAPIConnections(t *testing.T) {
 }
 
 func TestAPIHealth(t *testing.T) {
-	srv := NewServer(log.New("info"), nil, nil)
+	srv := NewServer(log.New("info"), nil, nil, nil)
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -80,7 +80,7 @@ func TestAPIHealth(t *testing.T) {
 
 func TestAPIVulns(t *testing.T) {
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), nil, vdb)
+	srv := NewServer(log.New("info"), nil, vdb, nil)
 
 	req := httptest.NewRequest("GET", "/api/vulns", nil)
 	w := httptest.NewRecorder()
@@ -100,7 +100,7 @@ func TestAPIVulns(t *testing.T) {
 }
 
 func TestCORSHeaders(t *testing.T) {
-	srv := NewServer(log.New("info"), nil, nil)
+	srv := NewServer(log.New("info"), nil, nil, nil)
 	req := httptest.NewRequest("OPTIONS", "/api/stats", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)

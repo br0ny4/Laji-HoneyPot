@@ -91,6 +91,17 @@ function Dashboard() {
       .then(r => r.json())
       .then(d => setConnections(d.connections || []))
       .catch(() => {})
+
+    // SSE 实时推送
+    const evtSource = new EventSource(`${API_BASE}/events`)
+    evtSource.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'stats') setStats(msg.data)
+      } catch {}
+    }
+    evtSource.onerror = () => evtSource.close()
+    return () => evtSource.close()
   }, [])
 
   return (

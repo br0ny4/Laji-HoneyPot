@@ -60,8 +60,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 启动 API 服务器
-	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB())
+	// 启动 API 服务器（含 SSE 实时推送）
+	wsHub := api.NewWSHub(logger, st)
+	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub)
 	go func() {
 		logger.Infow("API server listening", "addr", cfg.APIAddr)
 		if err := http.ListenAndServe(cfg.APIAddr, apiSrv.Handler()); err != nil {

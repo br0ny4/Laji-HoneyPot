@@ -2,13 +2,18 @@ package honeypot
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
+	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
+	dnsSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/dns"
+	ftpSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ftp"
 	httpSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/http"
+	ldapSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ldap"
 	mysqlSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/mysql"
 	redisSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/redis"
 	sshSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ssh"
@@ -19,10 +24,12 @@ import (
 // Engine 蜜罐引擎插件
 type Engine struct {
 	plugin.Base
-	logger *log.Logger
-	bus    *bus.Bus
-	store  *store.Store
-	stack  *tcpstack.Stack
+	logger      *log.Logger
+	bus         *bus.Bus
+	store       *store.Store
+	stack       *tcpstack.Stack
+	udpListener net.PacketConn
+	activeSvcs  int
 }
 
 // NewEngine 创建蜜罐引擎
@@ -36,7 +43,7 @@ func NewEngine(logger *log.Logger, bus *bus.Bus, st *store.Store) *Engine {
 }
 
 func (e *Engine) Name() string    { return "honeypot-engine" }
-func (e *Engine) Version() string { return "0.1.0" }
+func (e *Engine) Version() string { return "0.2.0" }
 
 func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("honeypot engine initializing")
@@ -45,55 +52,94 @@ func (e *Engine) Init(cfg config.Section) error {
 	mysqlSrv := mysqlSvc.New(e.logger)
 	redisSrv := redisSvc.New(e.logger)
 	sshSrv := sshSvc.New(e.logger)
+	ftpSrv := ftpSvc.New(e.logger)
+	ldapSrv := ldapSvc.New(e.logger)
 
-	ports := []struct {
+	// TCP 服务
+	tcpPorts := []struct {
 		port    int
 		name    string
 		handler func(net.Conn)
 	}{
-		{
-			port: cfg.GetInt("http_port"),
-			name: "HTTP",
-			handler: e.wrapHandler("HTTP", func(c net.Conn) {
-				httpSrv.Handle(c, e.onBreadcrumb)
-			}),
-		},
-		{
-			port: cfg.GetInt("mysql_port"),
-			name: "MySQL",
-			handler: e.wrapHandler("MySQL", func(c net.Conn) {
-				mysqlSrv.Handle(c)
-			}),
-		},
-		{
-			port: cfg.GetInt("redis_port"),
-			name: "Redis",
-			handler: e.wrapHandler("Redis", func(c net.Conn) {
-				redisSrv.Handle(c)
-			}),
-		},
-		{
-			port: cfg.GetInt("ssh_port"),
-			name: "SSH",
-			handler: e.wrapHandler("SSH", func(c net.Conn) {
-				sshSrv.Handle(c)
-			}),
-		},
+		{port: cfg.GetInt("http_port"), name: "HTTP",
+			handler: e.wrapHandler("HTTP", func(c net.Conn) { httpSrv.Handle(c, e.onBreadcrumb) })},
+		{port: cfg.GetInt("mysql_port"), name: "MySQL",
+			handler: e.wrapHandler("MySQL", func(c net.Conn) { mysqlSrv.Handle(c) })},
+		{port: cfg.GetInt("redis_port"), name: "Redis",
+			handler: e.wrapHandler("Redis", func(c net.Conn) { redisSrv.Handle(c) })},
+		{port: cfg.GetInt("ssh_port"), name: "SSH",
+			handler: e.wrapHandler("SSH", func(c net.Conn) { sshSrv.Handle(c) })},
+		{port: cfg.GetInt("ftp_port"), name: "FTP",
+			handler: e.wrapHandler("FTP", func(c net.Conn) { ftpSrv.Handle(c) })},
+		{port: cfg.GetInt("ldap_port"), name: "LDAP",
+			handler: e.wrapHandler("LDAP", func(c net.Conn) { ldapSrv.Handle(c) })},
 	}
 
-	for _, s := range ports {
+	for _, s := range tcpPorts {
 		if s.port <= 0 {
 			continue
 		}
 		if err := e.stack.Listen(s.port, s.handler); err != nil {
-			e.logger.Warnw("failed to start service", "name", s.name, "port", s.port, "error", err)
+			e.logger.Warnw("failed to start tcp service", "name", s.name, "port", s.port, "error", err)
+			continue
+		}
+		e.activeSvcs++
+	}
+
+	// DNS 使用 UDP
+	if dnsPort := cfg.GetInt("dns_port"); dnsPort > 0 {
+		dnsSrv := dnsSvc.New(e.logger)
+		addr := fmt.Sprintf(":%d", dnsPort)
+		pc, err := net.ListenPacket("udp", addr)
+		if err != nil {
+			e.logger.Warnw("failed to start dns udp", "port", dnsPort, "error", err)
+		} else {
+			e.udpListener = pc
+			e.activeSvcs++
+			go e.udpLoop(pc, func(c net.Conn) { dnsSrv.Handle(c) }, dnsPort)
+			e.logger.Infow("dns honeypot listening", "port", dnsPort, "proto", "udp")
 		}
 	}
 
+	e.logger.Infow("honeypot engine initialized", "active_services", e.activeSvcs)
 	return nil
 }
 
-// wrapHandler 包裹 handler，自动记录连接日志、发布事件
+func (e *Engine) udpLoop(pc net.PacketConn, handler func(net.Conn), port int) {
+	for {
+		buf := make([]byte, 512)
+		n, addr, err := pc.ReadFrom(buf)
+		if err != nil {
+			e.logger.Debugw("udp read closed", "port", port, "error", err)
+			return
+		}
+
+		host, _, _ := net.SplitHostPort(addr.String())
+		e.store.RecordConnection(host, port, "DNS", "")
+
+		// 模拟 net.Conn 给 handler
+		fakeConn := &udpConn{pc: pc, addr: addr, buf: buf[:n], n: n}
+		go handler(fakeConn)
+	}
+}
+
+// udpConn 将 net.PacketConn 伪装为 net.Conn 供 handler 统一调用
+type udpConn struct {
+	pc   net.PacketConn
+	addr net.Addr
+	buf  []byte
+	n    int
+}
+
+func (c *udpConn) Read(b []byte) (int, error)         { n := copy(b, c.buf[:c.n]); return n, nil }
+func (c *udpConn) Write(b []byte) (int, error)        { return c.pc.WriteTo(b, c.addr) }
+func (c *udpConn) Close() error                       { return nil }
+func (c *udpConn) LocalAddr() net.Addr                { return c.pc.LocalAddr() }
+func (c *udpConn) RemoteAddr() net.Addr               { return c.addr }
+func (c *udpConn) SetDeadline(t time.Time) error      { return nil }
+func (c *udpConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *udpConn) SetWriteDeadline(t time.Time) error { return nil }
+
 func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Conn) {
 	return func(conn net.Conn) {
 		remote := conn.RemoteAddr().String()
@@ -103,38 +149,22 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 			portNum = p
 		}
 
-		// 记录连接到数据库
 		e.store.RecordConnection(host, portNum, service, "")
 
-		// 发布连接事件到事件总线
 		evtData, _ := json.Marshal(map[string]interface{}{
-			"remote_ip": host,
-			"port":      portNum,
-			"service":   service,
+			"remote_ip": host, "port": portNum, "service": service,
 		})
 		e.bus.Publish("honeypot.connection", evtData)
 
-		// 执行实际 handler
 		handler(conn)
 	}
 }
 
-// onBreadcrumb HTTP 面包屑触发回调
 func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
-	e.logger.Warnw("BREADCRUMB TRIGGERED",
-		"remote", remoteIP,
-		"path", path,
-		"ua", userAgent,
-	)
-
-	// 记录攻击事件到数据库
+	e.logger.Warnw("BREADCRUMB TRIGGERED", "remote", remoteIP, "path", path, "ua", userAgent)
 	e.store.RecordAttack(remoteIP, path, "unknown", userAgent)
-
-	// 发布事件到总线
 	evtData, _ := json.Marshal(map[string]interface{}{
-		"remote_ip":  remoteIP,
-		"path":       path,
-		"user_agent": userAgent,
+		"remote_ip": remoteIP, "path": path, "user_agent": userAgent,
 	})
 	e.bus.Publish("honeypot.attack", evtData)
 }
@@ -147,5 +177,8 @@ func (e *Engine) Start() error {
 func (e *Engine) Stop() error {
 	e.logger.Info("honeypot engine stopping")
 	e.stack.CloseAll()
+	if e.udpListener != nil {
+		e.udpListener.Close()
+	}
 	return nil
 }

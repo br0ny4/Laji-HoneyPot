@@ -126,7 +126,12 @@ func (s *Store) RecordAttack(remoteIP, path, toolName, payload string) (int64, e
 
 // GetStats 获取仪表盘统计
 func (s *Store) GetStats() (*Stats, error) {
-	stats := &Stats{ActiveServices: 4} // HTTP, MySQL, Redis, SSH
+	stats := &Stats{}
+
+	s.db.QueryRow("SELECT COUNT(DISTINCT service) FROM connections").Scan(&stats.ActiveServices)
+	if stats.ActiveServices == 0 {
+		stats.ActiveServices = 7 // HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS
+	}
 
 	today := time.Now().Format("2006-01-02")
 	s.db.QueryRow("SELECT COUNT(*) FROM connections WHERE timestamp >= ?", today).Scan(&stats.TodayConns)

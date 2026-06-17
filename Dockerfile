@@ -20,6 +20,7 @@ COPY config.yaml /app/config.yaml
 USER honeypot
 WORKDIR /app
 
-EXPOSE 8080 8081 3306 6379 2222
+EXPOSE 8080 8081 3306 6379 2222 2121 3890
+EXPOSE 5354/udp
 
 ENTRYPOINT ["/app/honeypot"]
