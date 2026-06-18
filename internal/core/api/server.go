@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
@@ -111,7 +110,7 @@ func (s *Server) handleVulns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.1.0"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.3.0"})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -131,6 +130,3 @@ func queryInt(r *http.Request, key string, defaultVal int) int {
 	}
 	return n
 }
-
-// 避免未使用导入的警告
-var _ = strings.TrimSpace

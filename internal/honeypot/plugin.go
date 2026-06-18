@@ -43,7 +43,7 @@ func NewEngine(logger *log.Logger, bus *bus.Bus, st *store.Store) *Engine {
 }
 
 func (e *Engine) Name() string    { return "honeypot-engine" }
-func (e *Engine) Version() string { return "0.2.0" }
+func (e *Engine) Version() string { return "0.3.0" }
 
 func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("honeypot engine initializing")

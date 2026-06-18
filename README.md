@@ -236,7 +236,7 @@ Laji-HoneyPot/
 - [x] React 管理面板（动态 API 数据）
 - [x] CI/CD & Docker 部署
 - [ ] WebSocket 实时告警推送
-- [ ] 更多协议仿真（FTP/SMB/LDAP/RDP/DNS）
+- [x] FTP+DNS+LDAP 协议仿真（FTP/SMB/LDAP/RDP/DNS）
 - [ ] 自动化威胁情报聚合
 - [ ] 反制能力增强（截屏、文件读取 PoC）
 - [ ] gVisor 容器运行时集成

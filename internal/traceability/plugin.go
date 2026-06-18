@@ -16,6 +16,7 @@ type Engine struct {
 	logger     *log.Logger
 	bus        *bus.Bus
 	vulnDB     *vulndb.DB
+	crawler    *vulndb.NVDCrawler
 	collector  *fingerprint.Collector
 	payloadGen *payload.Generator
 }
@@ -26,6 +27,7 @@ func NewEngine(logger *log.Logger, bus *bus.Bus) *Engine {
 		logger:     logger,
 		bus:        bus,
 		vulnDB:     vulndb.NewDB(logger),
+		crawler:    vulndb.NewNVDCrawler(logger, ""),
 		collector:  fingerprint.NewCollector(logger),
 		payloadGen: payload.NewGenerator(logger, "http://localhost:8080"),
 	}
@@ -39,7 +41,7 @@ func NewEngine(logger *log.Logger, bus *bus.Bus) *Engine {
 }
 
 func (e *Engine) Name() string    { return "traceability-engine" }
-func (e *Engine) Version() string { return "0.1.0" }
+func (e *Engine) Version() string { return "0.3.0" }
 
 func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("traceability engine initialized")
@@ -48,6 +50,20 @@ func (e *Engine) Init(cfg config.Section) error {
 
 func (e *Engine) Start() error {
 	e.logger.Info("traceability engine started")
+
+	// 后台异步拉取最新漏洞情报
+	go func() {
+		entries, err := e.crawler.FetchRecent(vulndb.RedTeamKeywords)
+		if err != nil {
+			e.logger.Warnw("nvd crawl failed", "error", err)
+			return
+		}
+		for _, entry := range entries {
+			e.vulnDB.Add(entry)
+		}
+		e.logger.Infow("nvd crawl complete", "new_entries", len(entries))
+	}()
+
 	return nil
 }
 

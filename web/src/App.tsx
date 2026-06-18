@@ -47,7 +47,7 @@ function App() {
     <div className="app">
       <header className="app-header">
         <h1>Laji-HoneyPot</h1>
-        <span className="version">v0.2.0</span>
+        <span className="version">v0.3.0</span>
       </header>
 
       <nav className="tab-nav">

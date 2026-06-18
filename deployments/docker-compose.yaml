@@ -13,6 +13,9 @@ services:
       - "3306:3306"   # MySQL honeypot
       - "6379:6379"   # Redis honeypot
       - "2222:2222"   # SSH honeypot
+      - "2121:2121"   # FTP honeypot
+      - "3890:3890"   # LDAP honeypot
+      - "5354:5354/udp" # DNS honeypot
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro

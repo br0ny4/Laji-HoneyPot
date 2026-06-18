@@ -10,22 +10,6 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
-func startTestServer(t *testing.T, srv *Server) (string, net.Listener) {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
-	go func() {
-		for {
-			conn, _ := ln.Accept()
-			srv.Handle(conn, nil)
-		}
-	}()
-	time.Sleep(30 * time.Millisecond)
-	return "http://" + ln.Addr().String(), ln
-}
-
 func TestHTTPHoneypotRoot(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:18999")
 	if err != nil {
@@ -40,7 +24,6 @@ func TestHTTPHoneypotRoot(t *testing.T) {
 		conn, _ := ln.Accept()
 		srv.Handle(conn, nil)
 	}()
-
 
 	time.Sleep(30 * time.Millisecond)
 

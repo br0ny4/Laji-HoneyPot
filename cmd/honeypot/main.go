@@ -28,7 +28,7 @@ func main() {
 	logger := log.New(cfg.LogLevel)
 	eventBus := bus.New()
 
-	logger.Info("Laji-HoneyPot starting", "version", "0.1.0")
+	logger.Info("Laji-HoneyPot starting", "version", "0.3.0")
 
 	// 初始化 SQLite 持久化
 	st, err := store.New(cfg.DataDir)
