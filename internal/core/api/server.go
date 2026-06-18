@@ -69,7 +69,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.store.GetStats()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.logger.Errorw("stats query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
@@ -79,7 +80,8 @@ func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 50)
 	conns, err := s.store.GetConnections(limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.logger.Errorw("connections query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -92,11 +94,12 @@ func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 50)
 	attacks, err := s.store.GetAttacks(limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.logger.Errorw("attacks query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"total":  len(attacks),
+		"total":   len(attacks),
 		"attacks": attacks,
 	})
 }
@@ -125,8 +128,11 @@ func queryInt(r *http.Request, key string, defaultVal int) int {
 		return defaultVal
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil {
+	if err != nil || n <= 0 {
 		return defaultVal
+	}
+	if n > 1000 {
+		return 1000
 	}
 	return n
 }

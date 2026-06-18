@@ -58,7 +58,7 @@ func TestAPIConnections(t *testing.T) {
 	}
 
 	var resp struct {
-		Total       int               `json:"total"`
+		Total       int                `json:"total"`
 		Connections []store.Connection `json:"connections"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &resp)
@@ -138,4 +138,52 @@ func TestMemoryStore(t *testing.T) {
 	if stats.CounterHits != 1 {
 		t.Errorf("expected 1 attack, got %d", stats.CounterHits)
 	}
+}
+
+func TestQueryLimitClamp(t *testing.T) {
+	st, _ := store.New(":memory:")
+	defer st.Close()
+	for i := 0; i < 5; i++ {
+		st.RecordConnection("10.0.0.1", 80, "HTTP", "")
+	}
+	vdb := vulndb.NewDB(log.New("info"))
+	srv := NewServer(log.New("info"), st, vdb, nil)
+
+	// 请求超过上限的 limit
+	req := httptest.NewRequest("GET", "/api/connections?limit=9999", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestAPIErrorMasking(t *testing.T) {
+	// API 不应该在正常响应中泄漏内部实现细节
+	st, _ := store.New(":memory:")
+	defer st.Close()
+	vdb := vulndb.NewDB(log.New("info"))
+	srv := NewServer(log.New("info"), st, vdb, nil)
+
+	req := httptest.NewRequest("GET", "/api/stats", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	// 正常响应不应包含 SQLite 内部信息
+	if contains(w.Body.String(), "sqlite_master") {
+		t.Error("response should not leak internal SQL details")
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

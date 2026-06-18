@@ -18,6 +18,7 @@ type Stack struct {
 	logger    *log.Logger
 	handlers  map[int]ConnHandler
 	listeners map[int]net.Listener
+	wg        sync.WaitGroup // 跟踪 acceptLoop goroutine 生命周期
 }
 
 // New 创建 TCP 协议栈
@@ -47,7 +48,11 @@ func (s *Stack) Listen(port int, handler ConnHandler) error {
 	s.listeners[port] = ln
 	s.logger.Infow("tcp stack listening", "port", port)
 
-	go s.acceptLoop(port, ln)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.acceptLoop(port, ln)
+	}()
 	return nil
 }
 
@@ -81,14 +86,16 @@ func (s *Stack) Close(port int) error {
 	return ln.Close()
 }
 
-// CloseAll 关闭所有监听
+// CloseAll 关闭所有监听并等待所有 accept goroutine 退出
 func (s *Stack) CloseAll() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for port, ln := range s.listeners {
 		ln.Close()
 		delete(s.listeners, port)
 		delete(s.handlers, port)
 		s.logger.Debugw("tcp stack closed", "port", port)
 	}
+	s.mu.Unlock()
+
+	s.wg.Wait()
 }

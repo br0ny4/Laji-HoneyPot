@@ -42,48 +42,51 @@ func (c *NVDCrawler) FetchRecent(keywords []string) ([]*VulnEntry, error) {
 	var results []*VulnEntry
 
 	for _, kw := range keywords {
-		url := "https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=" + kw + "&resultsPerPage=5"
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			continue
-		}
-
-		if c.apiKey != "" {
-			req.Header.Set("apiKey", c.apiKey)
-		}
-
-		resp, err := c.client.Do(req)
-		if err != nil {
-			c.logger.Warnw("nvd fetch failed", "keyword", kw, "error", err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		var nvdResp nvdResponse
-		if err := json.NewDecoder(resp.Body).Decode(&nvdResp); err != nil {
-			continue
-		}
-
-		for _, v := range nvdResp.Vulnerabilities {
-			desc := ""
-			for _, d := range v.CVE.Descriptions {
-				if d.Lang == "en" {
-					desc = d.Value
-					break
-				}
+		// 匿名函数确保每个响应的 Body 在迭代结束时关闭
+		func(keyword string) {
+			url := "https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=" + keyword + "&resultsPerPage=5"
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				return
 			}
 
-			published, _ := time.Parse("2006-01-02T15:04:05", v.CVE.Published[:19])
+			if c.apiKey != "" {
+				req.Header.Set("apiKey", c.apiKey)
+			}
 
-			results = append(results, &VulnEntry{
-				ID:          v.CVE.ID,
-				Tool:        kw,
-				Title:       v.CVE.ID,
-				Description: desc,
-				CVE:         v.CVE.ID,
-				Discovered:  published,
-			})
-		}
+			resp, err := c.client.Do(req)
+			if err != nil {
+				c.logger.Warnw("nvd fetch failed", "keyword", keyword, "error", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			var nvdResp nvdResponse
+			if err := json.NewDecoder(resp.Body).Decode(&nvdResp); err != nil {
+				return
+			}
+
+			for _, v := range nvdResp.Vulnerabilities {
+				desc := ""
+				for _, d := range v.CVE.Descriptions {
+					if d.Lang == "en" {
+						desc = d.Value
+						break
+					}
+				}
+
+				published, _ := time.Parse("2006-01-02T15:04:05", v.CVE.Published[:19])
+
+				results = append(results, &VulnEntry{
+					ID:          v.CVE.ID,
+					Tool:        keyword,
+					Title:       v.CVE.ID,
+					Description: desc,
+					CVE:         v.CVE.ID,
+					Discovered:  published,
+				})
+			}
+		}(kw)
 	}
 
 	c.logger.Infow("nvd crawl complete", "results", len(results))

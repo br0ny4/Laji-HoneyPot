@@ -106,6 +106,9 @@ func (e *Engine) Init(cfg config.Section) error {
 }
 
 func (e *Engine) udpLoop(pc net.PacketConn, handler func(net.Conn), port int) {
+	// 速率限制：最多 100 并发 UDP 处理
+	sem := make(chan struct{}, 100)
+
 	for {
 		buf := make([]byte, 512)
 		n, addr, err := pc.ReadFrom(buf)
@@ -117,9 +120,18 @@ func (e *Engine) udpLoop(pc net.PacketConn, handler func(net.Conn), port int) {
 		host, _, _ := net.SplitHostPort(addr.String())
 		e.store.RecordConnection(host, port, "DNS", "")
 
-		// 模拟 net.Conn 给 handler
 		fakeConn := &udpConn{pc: pc, addr: addr, buf: buf[:n], n: n}
-		go handler(fakeConn)
+
+		sem <- struct{}{} // 获取令牌
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					e.logger.Errorw("DNS handler panic recovered", "port", port, "panic", r)
+				}
+				<-sem // 释放令牌
+			}()
+			handler(fakeConn)
+		}()
 	}
 }
 
@@ -142,6 +154,16 @@ func (c *udpConn) SetWriteDeadline(t time.Time) error { return nil }
 
 func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Conn) {
 	return func(conn net.Conn) {
+		defer func() {
+			if r := recover(); r != nil {
+				e.logger.Errorw("handler panic recovered",
+					"service", service,
+					"remote", conn.RemoteAddr().String(),
+					"panic", r,
+				)
+			}
+		}()
+
 		remote := conn.RemoteAddr().String()
 		host, port, _ := net.SplitHostPort(remote)
 		portNum := 0
@@ -151,10 +173,14 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 
 		e.store.RecordConnection(host, portNum, service, "")
 
-		evtData, _ := json.Marshal(map[string]interface{}{
+		evtData, err := json.Marshal(map[string]interface{}{
 			"remote_ip": host, "port": portNum, "service": service,
 		})
-		e.bus.Publish("honeypot.connection", evtData)
+		if err != nil {
+			e.logger.Warnw("json marshal failed in wrapHandler", "error", err)
+		} else {
+			e.bus.Publish("honeypot.connection", evtData)
+		}
 
 		handler(conn)
 	}
@@ -163,9 +189,13 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
 	e.logger.Warnw("BREADCRUMB TRIGGERED", "remote", remoteIP, "path", path, "ua", userAgent)
 	e.store.RecordAttack(remoteIP, path, "unknown", userAgent)
-	evtData, _ := json.Marshal(map[string]interface{}{
+	evtData, err := json.Marshal(map[string]interface{}{
 		"remote_ip": remoteIP, "path": path, "user_agent": userAgent,
 	})
+	if err != nil {
+		e.logger.Warnw("json marshal failed in onBreadcrumb", "error", err)
+		return
+	}
 	e.bus.Publish("honeypot.attack", evtData)
 }
 

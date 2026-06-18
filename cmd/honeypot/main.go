@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/api"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
@@ -30,7 +32,6 @@ func main() {
 
 	logger.Info("Laji-HoneyPot starting", "version", "0.3.0")
 
-	// 初始化 SQLite 持久化
 	st, err := store.New(cfg.DataDir)
 	if err != nil {
 		logger.Errorw("failed to init store", "error", err)
@@ -41,7 +42,6 @@ func main() {
 
 	reg := registry.New(logger, cfg)
 
-	// 注册插件（传入 Store 支持持久化）
 	hpEngine := honeypotEngine.NewEngine(logger, eventBus, st)
 	trEngine := traceEngine.NewEngine(logger, eventBus)
 	opEngine := opsEngine.NewEngine(logger, eventBus)
@@ -60,13 +60,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 启动 API 服务器（含 SSE 实时推送）
+	// API 服务器（含 SSE），支持优雅关闭
 	wsHub := api.NewWSHub(logger, st)
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub)
+	httpSrv := &http.Server{
+		Addr:    cfg.APIAddr,
+		Handler: apiSrv.Handler(),
+	}
 	go func() {
 		logger.Infow("API server listening", "addr", cfg.APIAddr)
-		if err := http.ListenAndServe(cfg.APIAddr, apiSrv.Handler()); err != nil {
-			logger.Errorw("API server stopped", "error", err)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Errorw("API server error", "error", err)
 		}
 	}()
 
@@ -78,6 +82,14 @@ func main() {
 	<-quit
 
 	logger.Info("shutting down...")
+
+	// 优雅关闭 API 服务器（最多等 5 秒）
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		logger.Errorw("API shutdown error", "error", err)
+	}
+
 	reg.StopAll()
 	logger.Info("Laji-HoneyPot stopped")
 }

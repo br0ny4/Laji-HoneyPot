@@ -65,11 +65,15 @@ func (h *WSHub) BroadcastStats() {
 	if err != nil {
 		return
 	}
-	data, _ := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]interface{}{
 		"type":      "stats",
 		"data":      stats,
 		"timestamp": time.Now().Unix(),
 	})
+	if err != nil {
+		h.logger.Warnw("broadcast stats marshal failed", "error", err)
+		return
+	}
 	h.Broadcast(data)
 }
 

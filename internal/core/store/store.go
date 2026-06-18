@@ -163,6 +163,9 @@ func (s *Store) GetConnections(limit int) ([]Connection, error) {
 		}
 		conns = append(conns, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan connections: %w", err)
+	}
 	return conns, nil
 }
 
@@ -187,6 +190,9 @@ func (s *Store) GetAttacks(limit int) ([]AttackEvent, error) {
 			continue
 		}
 		events = append(events, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan attacks: %w", err)
 	}
 	return events, nil
 }
