@@ -123,6 +123,20 @@ func (s *Store) RecordConnection(remoteIP string, port int, service, userAgent s
 	return res.LastInsertId()
 }
 
+// UpdateConnectionUA 更新最近一条匹配连接的 User-Agent（按 remote_ip + service 匹配）
+func (s *Store) UpdateConnectionUA(remoteIP, service, userAgent string) error {
+	_, err := s.db.Exec(
+		`UPDATE connections SET user_agent = ? 
+		 WHERE id = (
+		   SELECT id FROM connections 
+		   WHERE remote_ip = ? AND service = ? 
+		   ORDER BY timestamp DESC LIMIT 1
+		 )`,
+		userAgent, remoteIP, service,
+	)
+	return err
+}
+
 // RecordAttack 记录一次攻击事件
 func (s *Store) RecordAttack(remoteIP, path, toolName, payload string) (int64, error) {
 	res, err := s.db.Exec(

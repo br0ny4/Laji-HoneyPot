@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
+	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 )
 
 // Server 模拟 HTTP 服务（nginx 指纹 + 面包屑引流 + 浏览器反制 JS 注入）
@@ -18,14 +19,15 @@ import (
 // 每次响应自动注入浏览器指纹采集 JS，实现被动式溯源。
 type Server struct {
 	logger      *log.Logger
+	store       *store.Store
 	breadcrumbs []string // 面包屑路径列表
 	// 浏览器反制 JS Payload，在每个 HTML 页面中自动注入
 	fingerprintJS    string
 	countermeasureCB CountermeasureCallback // 面包屑触发时的额外反制 JS 回调
 }
 
-// New 创建 HTTP 蜜罐
-func New(logger *log.Logger) *Server {
+// New 创建 HTTP 蜜罐，st 可选（传 nil 则跳过 UA 补录）
+func New(logger *log.Logger, st *store.Store) *Server {
 	breadcrumbs := []string{
 		"/admin/config.php",
 		"/wp-admin/install.php",
@@ -41,6 +43,7 @@ func New(logger *log.Logger) *Server {
 	fpJS := buildFingerprintJS()
 	return &Server{
 		logger:        logger,
+		store:         st,
 		breadcrumbs:   breadcrumbs,
 		fingerprintJS: fpJS,
 	}
@@ -92,6 +95,11 @@ func (s *Server) Handle(conn net.Conn, onBreadcrumb BreadcrumbCallback) {
 			"path", path,
 			"user-agent", ua,
 		)
+
+		// 补录 UA 到连接记录（TCP 层记录时 UA 尚未解析）
+		if s.store != nil && ua != "" {
+			s.store.UpdateConnectionUA(remote, "HTTP", ua)
+		}
 
 		// 检测是否为面包屑路径 — 触碰即判定为攻击者
 		breadcrumbTriggered := false

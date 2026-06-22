@@ -344,3 +344,46 @@ func TestFingerprintsTableExists(t *testing.T) {
 		t.Error("fingerprints table not created")
 	}
 }
+
+func TestUpdateConnectionUA(t *testing.T) {
+	st, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer st.Close()
+
+	// 先创建一条 UA 为空的连接
+	st.RecordConnection("10.111.31.241:52987", 8081, "HTTP", "")
+
+	// 补录 UA
+	err = st.UpdateConnectionUA("10.111.31.241:52987", "HTTP", "curl/8.7.1")
+	if err != nil {
+		t.Fatalf("update ua: %v", err)
+	}
+
+	// 验证 UA 已更新
+	conns, err := st.GetConnections(10)
+	if err != nil {
+		t.Fatalf("get connections: %v", err)
+	}
+	if len(conns) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(conns))
+	}
+	if conns[0].UserAgent != "curl/8.7.1" {
+		t.Errorf("expected UA 'curl/8.7.1', got '%s'", conns[0].UserAgent)
+	}
+}
+
+func TestUpdateConnectionUANoMatch(t *testing.T) {
+	st, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer st.Close()
+
+	// 无匹配记录，应无错误
+	err = st.UpdateConnectionUA("10.0.0.1:12345", "HTTP", "Chrome/120")
+	if err != nil {
+		t.Errorf("expected no error for no match, got %v", err)
+	}
+}

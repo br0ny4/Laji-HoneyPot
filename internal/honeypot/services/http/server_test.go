@@ -18,7 +18,7 @@ func TestHTTPHoneypotRoot(t *testing.T) {
 	defer ln.Close()
 
 	logger := log.New("debug")
-	srv := New(logger)
+	srv := New(logger, nil)
 
 	go func() {
 		conn, _ := ln.Accept()
@@ -53,7 +53,7 @@ func TestAdminLoginPage(t *testing.T) {
 	defer ln.Close()
 
 	logger := log.New("debug")
-	srv := New(logger)
+	srv := New(logger, nil)
 
 	go func() {
 		conn, _ := ln.Accept()
@@ -75,7 +75,7 @@ func TestAdminLoginPage(t *testing.T) {
 }
 
 func TestBreadcrumbDetection(t *testing.T) {
-	srv := New(log.New("debug"))
+	srv := New(log.New("debug"), nil)
 	if !srv.isBreadcrumb("/admin/config.php") {
 		t.Error("expected /admin/config.php to be breadcrumb")
 	}
@@ -98,7 +98,7 @@ func TestCountermeasureInjection(t *testing.T) {
 	defer ln.Close()
 
 	logger := log.New("debug")
-	srv := New(logger)
+	srv := New(logger, nil)
 
 	// 注册反制回调
 	triggered := false
@@ -148,7 +148,7 @@ func TestNoCountermeasureOnNormalRequest(t *testing.T) {
 	defer ln.Close()
 
 	logger := log.New("debug")
-	srv := New(logger)
+	srv := New(logger, nil)
 	srv.SetCountermeasureCallback(func(path, userAgent, remoteIP string) string {
 		return "<script>should_not_appear</script>"
 	})

@@ -52,7 +52,7 @@ func (e *Engine) Version() string { return "0.4.0" }
 func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("honeypot engine initializing")
 
-	httpSrv := httpSvc.New(e.logger)
+	httpSrv := httpSvc.New(e.logger, e.store)
 	e.httpSrv = httpSrv
 	mysqlSrv := mysqlSvc.New(e.logger)
 	redisSrv := redisSvc.New(e.logger)
@@ -199,7 +199,7 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 
 func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
 	e.logger.Warnw("BREADCRUMB TRIGGERED", "remote", remoteIP, "path", path, "ua", userAgent)
-	e.store.RecordAttack(remoteIP, path, "unknown", userAgent)
+	e.store.RecordAttack(remoteIP, path, userAgent, "breadcrumb_trigger")
 	evtData, err := json.Marshal(map[string]interface{}{
 		"remote_ip": remoteIP, "path": path, "user_agent": userAgent,
 	})
