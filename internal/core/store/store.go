@@ -95,6 +95,17 @@ func (s *Store) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_conn_ip ON connections(remote_ip);
 	CREATE INDEX IF NOT EXISTS idx_attack_ts ON attack_events(timestamp);
 	CREATE INDEX IF NOT EXISTS idx_attack_ip ON attack_events(remote_ip);
+
+	CREATE TABLE IF NOT EXISTS fingerprints (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		tracking_id TEXT NOT NULL,
+		remote_ip TEXT NOT NULL,
+		user_agent TEXT DEFAULT '',
+		raw_data TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_fp_tracking ON fingerprints(tracking_id);
 	`
 	_, err := s.db.Exec(ddl)
 	return err
@@ -195,6 +206,55 @@ func (s *Store) GetAttacks(limit int) ([]AttackEvent, error) {
 		return nil, fmt.Errorf("scan attacks: %w", err)
 	}
 	return events, nil
+}
+
+// RecordFingerprint 记录浏览器指纹采集数据
+func (s *Store) RecordFingerprint(trackingID, remoteIP, userAgent, rawData string) (int64, error) {
+	res, err := s.db.Exec(
+		"INSERT INTO fingerprints (tracking_id, remote_ip, user_agent, raw_data) VALUES (?, ?, ?, ?)",
+		trackingID, remoteIP, userAgent, rawData,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetFingerprints 获取最近的指纹记录
+func (s *Store) GetFingerprints(limit int) ([]map[string]interface{}, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		"SELECT id, timestamp, tracking_id, remote_ip, user_agent, raw_data, created_at FROM fingerprints ORDER BY timestamp DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var timestamp, trackingID, remoteIP, userAgent, rawData, createdAt string
+		if err := rows.Scan(&id, &timestamp, &trackingID, &remoteIP, &userAgent, &rawData, &createdAt); err != nil {
+			continue
+		}
+		results = append(results, map[string]interface{}{
+			"id":          id,
+			"timestamp":   timestamp,
+			"tracking_id": trackingID,
+			"remote_ip":   remoteIP,
+			"user_agent":  userAgent,
+			"raw_data":    rawData,
+			"created_at":  createdAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan fingerprints: %w", err)
+	}
+	return results, nil
 }
 
 // Close 关闭数据库连接

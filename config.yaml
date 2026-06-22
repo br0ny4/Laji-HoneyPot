@@ -12,6 +12,8 @@ plugins:
     ftp_port: 2121
     ldap_port: 3890
     dns_port: 5354
+    smb_port: 4450
+    rdp_port: 33890
     tls_fingerprint: "nginx-1.24"
   traceability-engine:
     enabled: true

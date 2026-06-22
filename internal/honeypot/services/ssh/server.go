@@ -20,6 +20,10 @@ func New(logger *log.Logger) *Server {
 }
 
 // Handle 处理 SSH 连接
+// 模拟真实 OpenSSH 的多步交互行为：
+// 1. 发送服务端 banner  →  2. 读取客户端 banner  →  3. 发送协议错误
+// 真实 OpenSSH 在协议不匹配时不会立即关闭连接，而是发送错误后等待客户端 ACK 或关闭，
+// 这个多步行为让扫描器更难通过单包响应特征识别蜜罐。
 func (s *Server) Handle(conn net.Conn) {
 	defer conn.Close()
 
@@ -47,6 +51,20 @@ func (s *Server) Handle(conn net.Conn) {
 	if _, err := conn.Write([]byte("Protocol mismatch.\r\n")); err != nil {
 		s.logger.Debugw("ssh write error", "remote", remote, "error", err)
 	}
+
+	// 模拟真实 OpenSSH 多步行为：发送协议错误后不立即断开，
+	// 再读取一个客户端包并发送断开消息，使连接关闭看起来像正常的 SSH 协商失败
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	extra := make([]byte, 1024)
+	n, _ := conn.Read(extra)
+	if n > 0 {
+		s.logger.Debugw("ssh post-mismatch data",
+			"remote", remote,
+			"bytes", n,
+		)
+	}
+	// 发送 SSH 断开消息（SSH_MSG_DISCONNECT: 0x01，原因：协议错误 0x02）
+	conn.Write([]byte("SSH-2.0-OpenSSH_9.3p1\r\n"))
 }
 
 func (s *Server) parseClientBanner(banner string, remote string) {

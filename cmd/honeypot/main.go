@@ -60,6 +60,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 面包屑触发 → 反制 Payload 注入链路：溯源引擎根据攻击上下文智能选择最优载荷
+	hpEngine.SetCountermeasureProvider(func(path, userAgent, remoteIP string) string {
+		return trEngine.SelectPayload(path, userAgent, remoteIP)
+	})
+
 	// API 服务器（含 SSE），支持优雅关闭
 	wsHub := api.NewWSHub(logger, st)
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub)

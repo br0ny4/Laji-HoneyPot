@@ -275,3 +275,72 @@ func TestLargeConnectionBatch(t *testing.T) {
 		t.Errorf("expected 100 connections, got %d", len(all))
 	}
 }
+
+func TestRecordFingerprint(t *testing.T) {
+	st, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer st.Close()
+
+	id, err := st.RecordFingerprint("track-uuid-001", "10.0.0.1", "Chrome/120", `{"canvas":"hash","screen":"1920x1080"}`)
+	if err != nil {
+		t.Fatalf("record fingerprint: %v", err)
+	}
+	if id != 1 {
+		t.Errorf("expected id=1, got %d", id)
+	}
+}
+
+func TestGetFingerprints(t *testing.T) {
+	st, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer st.Close()
+
+	st.RecordFingerprint("track-001", "10.0.0.1", "Chrome/120", `{"screen":"1920x1080"}`)
+	st.RecordFingerprint("track-002", "10.0.0.2", "Firefox/121", `{"screen":"2560x1440"}`)
+
+	fps, err := st.GetFingerprints(10)
+	if err != nil {
+		t.Fatalf("get fingerprints: %v", err)
+	}
+	if len(fps) != 2 {
+		t.Errorf("expected 2 fingerprints, got %d", len(fps))
+	}
+}
+
+func TestGetFingerprintsDefaultLimit(t *testing.T) {
+	st, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer st.Close()
+
+	fps, err := st.GetFingerprints(0)
+	if err != nil {
+		t.Fatalf("get fingerprints: %v", err)
+	}
+	if len(fps) != 0 {
+		t.Errorf("expected 0 fingerprints, got %d", len(fps))
+	}
+}
+
+func TestFingerprintsTableExists(t *testing.T) {
+	st, err := New(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer st.Close()
+
+	rows, err := st.db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name='fingerprints'")
+	if err != nil {
+		t.Fatalf("query tables: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Error("fingerprints table not created")
+	}
+}

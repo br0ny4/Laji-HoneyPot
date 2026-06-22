@@ -152,18 +152,78 @@ function Dashboard() {
 }
 
 function HoneypotPanel() {
+  const [services, setServices] = useState<{ service: string; port: number; fingerprint: string; connections: number }[]>([])
+
+  useEffect(() => {
+    // 获取最近连接来推断活跃服务
+    fetch(`${API_BASE}/connections?limit=200`)
+      .then(r => r.json())
+      .then(d => {
+        const conns = (d.connections || []) as Connection[]
+        // 从连接中提取所有服务及其端口
+        const svcMap = new Map<string, { port: number; count: number }>()
+        conns.forEach((c: Connection) => {
+          const key = c.service
+          if (!svcMap.has(key)) {
+            svcMap.set(key, { port: c.port, count: 1 })
+          } else {
+            svcMap.get(key)!.count++
+          }
+        })
+
+        // 默认服务定义（含指纹信息）
+        const allSvcs = [
+          { service: 'HTTP', port: 8081, fingerprint: 'nginx/1.24.0 + PHP/8.1 + WordPress' },
+          { service: 'MySQL', port: 3306, fingerprint: 'MySQL 8.0.35' },
+          { service: 'Redis', port: 6379, fingerprint: 'Redis 6.2.13' },
+          { service: 'SSH', port: 2222, fingerprint: 'OpenSSH 9.3' },
+          { service: 'FTP', port: 2121, fingerprint: 'vsFTPd 3.0.3' },
+          { service: 'LDAP', port: 3890, fingerprint: 'OpenLDAP 2.6' },
+          { service: 'DNS', port: 5354, fingerprint: 'BIND 9.18' },
+          { service: 'SMB', port: 4450, fingerprint: 'Windows SMB 3.1.1 (Server 2019)' },
+          { service: 'RDP', port: 33890, fingerprint: 'Windows RDP 10.0' },
+        ]
+
+        setServices(allSvcs.map(s => ({
+          service: s.service,
+          port: s.port,
+          fingerprint: s.fingerprint,
+          connections: svcMap.get(s.service)?.count || 0,
+        })))
+      })
+      .catch(() => {
+        // 降级：显示默认列表
+        setServices([
+          { service: 'HTTP', port: 8081, fingerprint: 'nginx/1.24.0 + PHP/8.1', connections: 0 },
+          { service: 'MySQL', port: 3306, fingerprint: 'MySQL 8.0.35', connections: 0 },
+          { service: 'Redis', port: 6379, fingerprint: 'Redis 6.2.13', connections: 0 },
+          { service: 'SSH', port: 2222, fingerprint: 'OpenSSH 9.3', connections: 0 },
+          { service: 'FTP', port: 2121, fingerprint: 'vsFTPd 3.0.3', connections: 0 },
+          { service: 'LDAP', port: 3890, fingerprint: 'OpenLDAP 2.6', connections: 0 },
+          { service: 'DNS', port: 5354, fingerprint: 'BIND 9.18', connections: 0 },
+          { service: 'SMB', port: 4450, fingerprint: 'Windows SMB 3.1.1', connections: 0 },
+          { service: 'RDP', port: 33890, fingerprint: 'Windows RDP 10.0', connections: 0 },
+        ])
+      })
+  }, [])
+
   return (
     <div className="panel">
       <h2>蜜罐引擎</h2>
       <table>
         <thead>
-          <tr><th>服务</th><th>端口</th><th>状态</th><th>指纹</th><th>面包屑</th></tr>
+          <tr><th>服务</th><th>端口</th><th>状态</th><th>指纹</th><th>近期连接</th></tr>
         </thead>
         <tbody>
-          <tr><td>HTTP</td><td>8081</td><td className="status-online">运行中</td><td>nginx/1.24.0</td><td>10 路径</td></tr>
-          <tr><td>MySQL</td><td>3306</td><td className="status-online">运行中</td><td>MySQL 8.0.35</td><td>-</td></tr>
-          <tr><td>Redis</td><td>6379</td><td className="status-online">运行中</td><td>Redis 6.2.13</td><td>-</td></tr>
-          <tr><td>SSH</td><td>2222</td><td className="status-online">运行中</td><td>OpenSSH 9.3</td><td>-</td></tr>
+          {services.map(s => (
+            <tr key={s.service}>
+              <td><strong>{s.service}</strong></td>
+              <td>{s.port}</td>
+              <td className="status-online">运行中</td>
+              <td className="fingerprint-cell">{s.fingerprint}</td>
+              <td>{s.connections > 0 ? s.connections : '-'}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

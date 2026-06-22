@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
@@ -47,6 +50,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	// 实时推送(SSE)
 	s.mux.HandleFunc("/api/events", s.wsHub.ServeWS)
+	// 浏览器指纹采集
+	s.mux.HandleFunc("/api/collect", s.handleCollect)
 }
 
 // Handler 返回带 CORS + 速率限制的 http.Handler
@@ -118,6 +123,69 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.4.0"})
 }
 
+func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
+	remoteIP := r.RemoteAddr
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		remoteIP = fwd
+	}
+	userAgent := r.Header.Get("User-Agent")
+
+	// 读取或生成追踪 Cookie
+	cookie, err := r.Cookie("_hp_track")
+	trackingID := ""
+	if err == nil && cookie != nil {
+		trackingID = cookie.Value
+	}
+	if trackingID == "" {
+		trackingID = newUUID()
+	}
+
+	// 解析指纹数据
+	rawData := ""
+	if r.Method == http.MethodPost {
+		body, err := io.ReadAll(r.Body)
+		if err == nil {
+			rawData = string(body)
+		}
+	} else {
+		rawData = r.URL.Query().Get("d")
+	}
+
+	if rawData == "" {
+		rawData = "{}"
+	}
+
+	// 存储指纹数据
+	if _, err := s.store.RecordFingerprint(trackingID, remoteIP, userAgent, rawData); err != nil {
+		s.logger.Errorw("fingerprint store failed", "error", err)
+	}
+
+	// 设置持久化追踪 Cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "_hp_track",
+		Value:    trackingID,
+		Path:     "/",
+		MaxAge:   365 * 24 * 3600,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	// 响应 1x1 透明像素 GIF（用于 img 标签回调）
+	w.Header().Set("Content-Type", "image/gif")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x00\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x01\x44\x00\x3b"))
+}
+
+func newUUID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -162,7 +230,7 @@ func (rl *rateLimiter) allow(ip string) bool {
 
 	v, exists := rl.visitors[ip]
 	if !exists {
-		rl.visitors[ip] = &visitor{tokens: 9, lastSeen: time.Now()}
+		rl.visitors[ip] = &visitor{tokens: 100, lastSeen: time.Now()}
 		return true
 	}
 

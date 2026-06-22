@@ -12,7 +12,7 @@ Laji-HoneyPot 是一款开源的高交互蜜罐系统，核心差异化在于：
 
 ### 高交互业务仿真
 - 自研 TCP 协议栈 + TLS 指纹伪装（绕过 Shodan/ZoomEye 识别）
-- 首批覆盖 **HTTP、MySQL、Redis、SSH** 四大主流服务协议仿真
+- 首批覆盖 **HTTP、MySQL、Redis、SSH、FTP、LDAP、DNS、SMB、RDP** 九大主流服务协议仿真
 - 高度贴合真实生产环境的交互逻辑
 
 ### 面包屑引流 — 访问即攻击者
@@ -183,6 +183,8 @@ docker compose up -d
 | 2121 | FTP | vsFTPd 3.0.3 |
 | 3890 | LDAP | OpenLDAP 2.6 |
 | 5354 | DNS | BIND 9.18 (UDP) |
+| 4450 | SMB | Windows SMB 3.1.1 (Server 2019) |
+| 33890 | RDP | Windows RDP 10.0 |
 | 8080 | API | — |
 
 ---
@@ -198,7 +200,7 @@ Laji-HoneyPot/
 │   ├── honeypot/              # 蜜罐引擎
 │   │   ├── tcpstack/          # 自研 TCP 协议栈
 │   │   ├── tls/               # TLS 指纹伪装
-│   │   ├── services/          # 服务仿真（HTTP/MySQL/Redis/SSH）
+│   │   ├── services/          # 服务仿真（HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP）
 │   │   └── manager/           # 容器安全管理
 │   ├── traceability/          # 溯源反制引擎
 │   │   ├── vulndb/            # 漏洞数据库 & NVD 爬虫
@@ -244,15 +246,18 @@ Laji-HoneyPot/
 - [x] CI/CD & Docker 部署
 - [x] SSE 实时推送
 - [x] FTP+DNS+LDAP 协议仿真
+- [x] SMB/RDP 协议仿真（v0.4）
 - [x] 浏览器被动指纹采集（Canvas/WebGL/WebRTC 自动注入）
+- [x] 面包屑→反制 Payload 注入全链路（v0.4）
+- [x] 追踪 Cookie (`_hp_track`) 持久化攻击者追踪
+- [x] 指纹数据 `/api/collect` 端点 + SQLite 持久化（v0.4）
 - [x] API 速率限制（令牌桶算法）
 - [x] RESP 协议解析器重写
-- [x] 全量服务单元测试覆盖（69 项测试）
-- [x] golangci-lint 静态分析配置
+- [x] 全量服务单元测试覆盖（90+ 项测试，v0.4）
+- [x] 前端面板动态化（9 服务实时数据，v0.4）
 - [ ] 自动化威胁情报聚合
 - [ ] 反制能力增强（截屏、文件读取 PoC）
 - [ ] gVisor 容器运行时集成
-- [ ] SMB/RDP 协议仿真
 
 ---
 

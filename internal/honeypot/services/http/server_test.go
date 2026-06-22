@@ -90,6 +90,91 @@ func TestBreadcrumbDetection(t *testing.T) {
 	}
 }
 
+func TestCountermeasureInjection(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:19999")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	logger := log.New("debug")
+	srv := New(logger)
+
+	// 注册反制回调
+	triggered := false
+	srv.SetCountermeasureCallback(func(path, userAgent, remoteIP string) string {
+		triggered = true
+		return "<script>console.log('counter')</script>"
+	})
+
+	bcCalled := false
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, func(remoteIP, path, userAgent string) {
+			bcCalled = true
+		})
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	// 访问面包屑路径
+	resp, err := http.Get("http://127.0.0.1:19999/admin/config.php")
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	// 面包屑回调应触发
+	if !bcCalled {
+		t.Error("expected breadcrumb callback to be called")
+	}
+	// 反制 Payload 应被注入
+	if !triggered {
+		t.Error("expected countermeasure callback to be called")
+	}
+	if !contains(bodyStr, "console.log('counter')") {
+		t.Error("expected countermeasure script in response body")
+	}
+}
+
+func TestNoCountermeasureOnNormalRequest(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:19998")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	logger := log.New("debug")
+	srv := New(logger)
+	srv.SetCountermeasureCallback(func(path, userAgent, remoteIP string) string {
+		return "<script>should_not_appear</script>"
+	})
+
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, nil)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	// 访问正常路径
+	resp, err := http.Get("http://127.0.0.1:19998/")
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	if contains(bodyStr, "should_not_appear") {
+		t.Error("countermeasure script should NOT appear on normal requests")
+	}
+}
+
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

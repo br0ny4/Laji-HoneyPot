@@ -15,7 +15,9 @@ import (
 	httpSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/http"
 	ldapSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ldap"
 	mysqlSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/mysql"
+	rdpSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/rdp"
 	redisSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/redis"
+	smbSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/smb"
 	sshSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ssh"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/tcpstack"
 	"github.com/Laji-HoneyPot/honeypot/internal/plugin"
@@ -24,12 +26,14 @@ import (
 // Engine 蜜罐引擎插件
 type Engine struct {
 	plugin.Base
-	logger      *log.Logger
-	bus         *bus.Bus
-	store       *store.Store
-	stack       *tcpstack.Stack
-	udpListener net.PacketConn
-	activeSvcs  int
+	logger           *log.Logger
+	bus              *bus.Bus
+	store            *store.Store
+	stack            *tcpstack.Stack
+	udpListener      net.PacketConn
+	activeSvcs       int
+	httpSrv          *httpSvc.Server                               // HTTP 蜜罐实例
+	countermeasureFn func(path, userAgent, remoteIP string) string // 面包屑触发的反制 JS 注入回调
 }
 
 // NewEngine 创建蜜罐引擎
@@ -49,11 +53,14 @@ func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("honeypot engine initializing")
 
 	httpSrv := httpSvc.New(e.logger)
+	e.httpSrv = httpSrv
 	mysqlSrv := mysqlSvc.New(e.logger)
 	redisSrv := redisSvc.New(e.logger)
 	sshSrv := sshSvc.New(e.logger)
 	ftpSrv := ftpSvc.New(e.logger)
 	ldapSrv := ldapSvc.New(e.logger)
+	smbSrv := smbSvc.New(e.logger)
+	rdpSrv := rdpSvc.New(e.logger)
 
 	// TCP 服务
 	tcpPorts := []struct {
@@ -73,6 +80,10 @@ func (e *Engine) Init(cfg config.Section) error {
 			handler: e.wrapHandler("FTP", func(c net.Conn) { ftpSrv.Handle(c) })},
 		{port: cfg.GetInt("ldap_port"), name: "LDAP",
 			handler: e.wrapHandler("LDAP", func(c net.Conn) { ldapSrv.Handle(c) })},
+		{port: cfg.GetInt("smb_port"), name: "SMB",
+			handler: e.wrapHandler("SMB", func(c net.Conn) { smbSrv.Handle(c) })},
+		{port: cfg.GetInt("rdp_port"), name: "RDP",
+			handler: e.wrapHandler("RDP", func(c net.Conn) { rdpSrv.Handle(c) })},
 	}
 
 	for _, s := range tcpPorts {
@@ -196,7 +207,18 @@ func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
 		e.logger.Warnw("json marshal failed in onBreadcrumb", "error", err)
 		return
 	}
+	// 同步发布 breadcrumb 事件（溯源引擎需即时响应）
+	e.bus.PublishSync("honeypot.breadcrumb", evtData)
 	e.bus.Publish("honeypot.attack", evtData)
+}
+
+// SetCountermeasureProvider 注册反制 Payload 注入回调
+// 当面包屑触发时，HTTP 蜜罐会调用此回调获取额外 JS 注入到响应中
+func (e *Engine) SetCountermeasureProvider(fn func(path, userAgent, remoteIP string) string) {
+	e.countermeasureFn = fn
+	if e.httpSrv != nil {
+		e.httpSrv.SetCountermeasureCallback(fn)
+	}
 }
 
 func (e *Engine) Start() error {
