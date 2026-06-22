@@ -71,12 +71,14 @@ func (s *Server) Handle(conn net.Conn) {
 		case strings.HasPrefix(cmd, "LIST") || strings.HasPrefix(cmd, "MLSD"):
 			s.reply(conn, "150 Here comes the directory listing.")
 			// 伪造文件列表
-			conn.Write([]byte(
+			if _, err := conn.Write([]byte(
 				"-rw-r--r--    1 ftp      ftp          4096 Jan 01 2024 index.html\r\n" +
 					"-rw-r--r--    1 ftp      ftp          2048 Jan 01 2024 config.php\r\n" +
 					"drwxr-xr-x    2 ftp      ftp          4096 Jan 01 2024 uploads\r\n" +
 					"-rw-r--r--    1 ftp      ftp        102400 Jan 01 2024 backup.sql\r\n",
-			))
+			)); err != nil {
+				return
+			}
 			s.reply(conn, "226 Directory send OK.")
 		case strings.HasPrefix(cmd, "CWD"):
 			s.reply(conn, "250 Directory successfully changed.")
@@ -90,5 +92,7 @@ func (s *Server) Handle(conn net.Conn) {
 }
 
 func (s *Server) reply(conn net.Conn, msg string) {
-	conn.Write([]byte(fmt.Sprintf("%s\r\n", msg)))
+	if _, err := fmt.Fprintf(conn, "%s\r\n", msg); err != nil {
+		s.logger.Debugw("ftp write error", "error", err)
+	}
 }

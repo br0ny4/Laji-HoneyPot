@@ -1,19 +1,45 @@
+run:
+  timeout: 3m
+  concurrency: 4
+
 linters:
   enable:
-    - gofmt
-    - govet
     - errcheck
-    - staticcheck
     - gosimple
+    - govet
     - ineffassign
+    - staticcheck
     - unused
+    - gofmt
+    - goimports
     - misspell
+    - unconvert
+    - gocyclo
+    - gosec
+  disable-all: false
 
-run:
-  timeout: 5m
-  go: "1.22"
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  gosec:
+    excludes:
+      - G104  # stderr/stdout not checked (honeypot write errors intentionally suppressed)
+  errcheck:
+    exclude-functions:
+      - (*net.Conn).Write
+      - (*net.Conn).Close
 
 issues:
-  exclude-use-default: false
-  max-issues-per-linter: 0
-  max-same-issues: 0
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+    - path: internal/honeypot/services/
+      linters:
+        - gosec
+      text: "G104"
+
+output:
+  formats:
+    - format: colored-line-number

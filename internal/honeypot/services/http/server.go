@@ -11,30 +11,36 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
-// Server 模拟 HTTP 服务（nginx 指纹 + 面包屑引流）
+// Server 模拟 HTTP 服务（nginx 指纹 + 面包屑引流 + 浏览器反制 JS 注入）
 // 核心设计：页面中嵌入天然不可见的"面包屑"链接（HTML注释、robots.txt隐藏路径等），
 // 正常用户无动机访问这些路径，只有扫描器和攻击者才会触碰，实现访问者即攻击者的判定。
+// 每次响应自动注入浏览器指纹采集 JS，实现被动式溯源。
 type Server struct {
 	logger      *log.Logger
 	breadcrumbs []string // 面包屑路径列表
+	// 浏览器反制 JS Payload，在每个 HTML 页面中自动注入
+	fingerprintJS string
 }
 
 // New 创建 HTTP 蜜罐
 func New(logger *log.Logger) *Server {
+	breadcrumbs := []string{
+		"/admin/config.php",
+		"/wp-admin/install.php",
+		"/.git/config",
+		"/api/v1/internal/users",
+		"/backup/database.sql",
+		"/debug/pprof/",
+		"/actuator/env",
+		"/swagger-ui.html",
+		"/druid/index.html",
+		"/phpmyadmin/index.php",
+	}
+	fpJS := buildFingerprintJS()
 	return &Server{
-		logger: logger,
-		breadcrumbs: []string{
-			"/admin/config.php",
-			"/wp-admin/install.php",
-			"/.git/config",
-			"/api/v1/internal/users",
-			"/backup/database.sql",
-			"/debug/pprof/",
-			"/actuator/env",
-			"/swagger-ui.html",
-			"/druid/index.html",
-			"/phpmyadmin/index.php",
-		},
+		logger:        logger,
+		breadcrumbs:   breadcrumbs,
+		fingerprintJS: fpJS,
 	}
 }
 
@@ -89,7 +95,10 @@ func (s *Server) Handle(conn net.Conn, onBreadcrumb BreadcrumbCallback) {
 		}
 
 		resp := s.buildResponse(path, headers)
-		conn.Write([]byte(resp))
+		if _, err := conn.Write([]byte(resp)); err != nil {
+			s.logger.Debugw("http write error", "remote", remote, "error", err)
+			return
+		}
 	}
 }
 
@@ -148,13 +157,15 @@ func (s *Server) renderPage(path string) string {
 <head><title>Welcome | Laji-HoneyPot</title>
 <meta name="generator" content="WordPress 6.4.3" />
 %s
+<script>%s</script>
 </head>
 <body>
 <h1>Welcome to Nginx</h1>
 <p>Path: %s</p>
 %s
+<script>%s</script>
 </body>
-</html>`, s.fakeRobotsTxt(), path, breadcrumbLinks)
+</html>`, s.fakeRobotsTxt(), s.fingerprintJS, path, breadcrumbLinks, s.fingerprintJS)
 }
 
 // fakeRobotsTxt 在页面中嵌入伪装的 robots.txt 链接，包含面包屑路径
@@ -193,4 +204,10 @@ func (s *Server) errorPage(code int) string {
 
 func (s *Server) fakeSessionID() string {
 	return "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+}
+
+// buildFingerprintJS 生成浏览器被动指纹采集代码
+// 采集：Canvas 指纹、WebGL GPU 信息、屏幕分辨率、时区、WebRTC 内网 IP、插件列表
+func buildFingerprintJS() string {
+	return `(function(){var d={};try{var c=document.createElement('canvas');c.width=280;c.height=60;var x=c.getContext('2d');x.fillStyle='#f60';x.fillRect(125,1,62,20);x.fillStyle='#069';x.fillText('Trace',2,15);d.canvas=c.toDataURL().substring(0,120)}catch(e){d.canvas='err'}try{var g=document.createElement('canvas').getContext('webgl');if(g){d.gpu=g.getParameter(g.RENDERER)}}catch(e){}d.scr=screen.width+'x'+screen.height;d.tz=Intl.DateTimeFormat().resolvedOptions().timeZone;d.lang=navigator.language;try{var p=[];for(var i=0;i<navigator.plugins.length;i++)p.push(navigator.plugins[i].name);d.plugins=p}catch(e){}try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};setTimeout(function(){new Image().src='/collect?d='+encodeURIComponent(JSON.stringify(d))},2000)}catch(e){new Image().src='/collect?d='+encodeURIComponent(JSON.stringify(d))}})();`
 }

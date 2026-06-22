@@ -27,7 +27,9 @@ func (s *Server) Handle(conn net.Conn) {
 	s.logger.Infow("ssh connection", "remote", remote)
 
 	banner := "SSH-2.0-OpenSSH_9.3p1 Ubuntu-1ubuntu2.1\r\n"
-	conn.Write([]byte(banner))
+	if _, err := conn.Write([]byte(banner)); err != nil {
+		return
+	}
 
 	conn.SetDeadline(time.Now().Add(15 * time.Second))
 	reader := bufio.NewReader(conn)
@@ -42,7 +44,9 @@ func (s *Server) Handle(conn net.Conn) {
 	s.parseClientBanner(clientBanner, remote)
 
 	// 发送协议错误（捕获版本信息后断开）
-	conn.Write([]byte("Protocol mismatch.\r\n"))
+	if _, err := conn.Write([]byte("Protocol mismatch.\r\n")); err != nil {
+		s.logger.Debugw("ssh write error", "remote", remote, "error", err)
+	}
 }
 
 func (s *Server) parseClientBanner(banner string, remote string) {

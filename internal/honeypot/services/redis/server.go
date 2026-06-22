@@ -3,6 +3,7 @@ package redis
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -46,38 +47,52 @@ func (s *Server) Handle(conn net.Conn) {
 		s.logger.Infow("redis command", "remote", remote, "command", cmd)
 
 		resp := s.handleCommand(cmd)
-		conn.Write([]byte(resp))
+		if _, err := conn.Write([]byte(resp)); err != nil {
+			s.logger.Debugw("redis write error", "remote", remote, "error", err)
+			return
+		}
 	}
 }
 
+// readRESP 正确解析 RESP 协议数组，返回命令参数列表。
+// firstLine 格式: *N\r\n，N 为元素个数，上限 128。
 func (s *Server) readRESP(reader *bufio.Reader, firstLine string) []string {
-	parts := []string{}
-	for i := 0; i < 5; i++ {
+	var count int
+	if _, err := fmt.Sscanf(firstLine, "*%d", &count); err != nil || count <= 0 || count > 128 {
+		return nil
+	}
+
+	args := make([]string, 0, count)
+	for i := 0; i < count; i++ {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			break
 		}
-		parts = append(parts, strings.TrimSpace(line))
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "$") {
+			var length int
+			if _, err := fmt.Sscanf(line, "$%d", &length); err != nil || length < 0 || length > 512*1024*1024 {
+				break
+			}
+			data := make([]byte, length+2) // +2 for trailing \r\n
+			if _, err := io.ReadFull(reader, data); err != nil {
+				break
+			}
+			args = append(args, string(data[:length]))
+		} else {
+			args = append(args, line)
+		}
 	}
-	return parts
+	return args
 }
 
-func (s *Server) handleCommand(parts []string) string {
-	if len(parts) == 0 {
+func (s *Server) handleCommand(args []string) string {
+	if len(args) == 0 {
 		return "-ERR unknown command\r\n"
 	}
 
-	cmd := ""
-	for _, p := range parts {
-		up := strings.ToUpper(p)
-		if up == "PING" || up == "INFO" || up == "AUTH" || up == "SET" ||
-			up == "GET" || up == "CONFIG" || up == "KEYS" || up == "COMMAND" ||
-			up == "SLAVEOF" || up == "REPLCONF" || up == "CLIENT" ||
-			up == "FLUSHALL" || up == "FLUSHDB" || up == "DEBUG" || up == "EVAL" {
-			cmd = up
-			break
-		}
-	}
+	cmd := strings.ToUpper(args[0])
 
 	switch cmd {
 	case "PING":
@@ -98,8 +113,10 @@ func (s *Server) handleCommand(parts []string) string {
 		return "-ERR unknown subcommand\r\n"
 	case "EVAL":
 		return "-ERR Redis is configured in read-only mode\r\n"
+	case "SET", "GET", "SLAVEOF", "REPLCONF", "CLIENT":
+		return "-ERR operation not permitted\r\n"
 	default:
-		return "-ERR unknown command '" + cmd + "'\r\n"
+		return fmt.Sprintf("-ERR unknown command '%s'\r\n", cmd)
 	}
 }
 

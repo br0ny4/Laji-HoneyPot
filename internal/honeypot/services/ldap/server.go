@@ -40,7 +40,9 @@ func (s *Server) Handle(conn net.Conn) {
 
 	// 构造 bindResponse: resultCode=49 (invalidCredentials)
 	resp := s.buildBindResponse(msgID, 49, "", "Invalid credentials")
-	conn.Write(resp)
+	if _, err := conn.Write(resp); err != nil {
+		s.logger.Debugw("ldap write error", "remote", remote, "error", err)
+	}
 
 	s.logger.Infow("ldap auth rejected", "remote", remote, "result", "invalidCredentials")
 }

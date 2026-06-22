@@ -121,11 +121,15 @@ curl -v http://127.0.0.1:8081/.git/config
 curl -sI http://127.0.0.1:8081/ | grep Server
 # 预期输出: Server: nginx/1.24.0
 
-# 4. 验证反制漏洞 — 浏览器指纹采集
-# 用浏览器访问 http://127.0.0.1:8081/
-# 打开开发者工具 Network 标签，观察 /collect 数据回传请求
+# 4. 验证 FTP/DNS/LDAP 协议仿真
+echo -e "USER admin\nPASS test" | nc 127.0.0.1 2121
+dig @127.0.0.1 -p 5354 example.com
 
-# 5. 查看 API 统计数据
+# 5. 验证浏览器反制 — 被动指纹采集
+# 用浏览器访问 http://127.0.0.1:8081/
+# 打开开发者工具 Network 标签，观察 Canvas/WebGL/WebRTC 指纹采集回传
+
+# 6. 查看 API 统计数据
 curl http://127.0.0.1:8080/api/stats
 curl http://127.0.0.1:8080/api/attacks
 ```
@@ -176,6 +180,9 @@ docker compose up -d
 | 3306 | MySQL | MySQL 8.0.35 |
 | 6379 | Redis | Redis 6.2.13 |
 | 2222 | SSH | OpenSSH 9.3 |
+| 2121 | FTP | vsFTPd 3.0.3 |
+| 3890 | LDAP | OpenLDAP 2.6 |
+| 5354 | DNS | BIND 9.18 (UDP) |
 | 8080 | API | — |
 
 ---
@@ -235,11 +242,17 @@ Laji-HoneyPot/
 - [x] 事件总线串联（蜜罐 → 溯源引擎）
 - [x] React 管理面板（动态 API 数据）
 - [x] CI/CD & Docker 部署
-- [ ] WebSocket 实时告警推送
-- [x] FTP+DNS+LDAP 协议仿真（FTP/SMB/LDAP/RDP/DNS）
+- [x] SSE 实时推送
+- [x] FTP+DNS+LDAP 协议仿真
+- [x] 浏览器被动指纹采集（Canvas/WebGL/WebRTC 自动注入）
+- [x] API 速率限制（令牌桶算法）
+- [x] RESP 协议解析器重写
+- [x] 全量服务单元测试覆盖（69 项测试）
+- [x] golangci-lint 静态分析配置
 - [ ] 自动化威胁情报聚合
 - [ ] 反制能力增强（截屏、文件读取 PoC）
 - [ ] gVisor 容器运行时集成
+- [ ] SMB/RDP 协议仿真
 
 ---
 

@@ -124,7 +124,9 @@ func (s *Server) sendErr(conn net.Conn, code uint16, message string) {
 	pkt[3] = 2
 	copy(pkt[4:], buf)
 
-	conn.Write(pkt)
+	if _, err := conn.Write(pkt); err != nil {
+		s.logger.Debugw("mysql write error", "error", err)
+	}
 }
 
 var _ fmt.Stringer = (*Server)(nil)

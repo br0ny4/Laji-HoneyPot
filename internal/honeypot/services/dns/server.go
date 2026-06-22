@@ -41,7 +41,9 @@ func (s *Server) Handle(conn net.Conn) {
 
 	// 构造 DNS 响应：授权服务器拒绝（REFUSED），诱捕攻击者
 	resp := s.buildResponse(txID, domain)
-	conn.Write(resp)
+	if _, err := conn.Write(resp); err != nil {
+		s.logger.Debugw("dns write error", "remote", remote, "error", err)
+	}
 }
 
 func (s *Server) parseDomain(data []byte) string {
@@ -70,9 +72,9 @@ func (s *Server) buildResponse(txID uint16, domain string) []byte {
 	binary.BigEndian.PutUint16(header[0:2], txID) // Transaction ID（回显）
 	// Flags: QR=1(响应) OPCODE=0 RCODE=5(REFUSED) — 模拟权威服务器拒绝
 	binary.BigEndian.PutUint16(header[2:4], 0x8185)
-	binary.BigEndian.PutUint16(header[4:6], 0) // QDCOUNT=0
-	binary.BigEndian.PutUint16(header[6:8], 0) // ANCOUNT=0
-	binary.BigEndian.PutUint16(header[8:10], 0) // NSCOUNT=0
+	binary.BigEndian.PutUint16(header[4:6], 0)   // QDCOUNT=0
+	binary.BigEndian.PutUint16(header[6:8], 0)   // ANCOUNT=0
+	binary.BigEndian.PutUint16(header[8:10], 0)  // NSCOUNT=0
 	binary.BigEndian.PutUint16(header[10:12], 0) // ARCOUNT=0
 	resp = append(resp, header...)
 
@@ -82,9 +84,9 @@ func (s *Server) buildResponse(txID uint16, domain string) []byte {
 			resp = append(resp, byte(len(label)))
 			resp = append(resp, []byte(label)...)
 		}
-		resp = append(resp, 0x00)         // 终止符
-		resp = append(resp, 0x00, 0x01)   // QTYPE=A
-		resp = append(resp, 0x00, 0x01)   // QCLASS=IN
+		resp = append(resp, 0x00)       // 终止符
+		resp = append(resp, 0x00, 0x01) // QTYPE=A
+		resp = append(resp, 0x00, 0x01) // QCLASS=IN
 		// 更新 QDCOUNT=1
 		binary.BigEndian.PutUint16(resp[4:6], 1)
 	}

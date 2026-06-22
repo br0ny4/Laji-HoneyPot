@@ -41,7 +41,7 @@ func NewEngine(logger *log.Logger, bus *bus.Bus) *Engine {
 }
 
 func (e *Engine) Name() string    { return "traceability-engine" }
-func (e *Engine) Version() string { return "0.3.0" }
+func (e *Engine) Version() string { return "0.4.0" }
 
 func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("traceability engine initialized")
