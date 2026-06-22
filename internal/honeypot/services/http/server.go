@@ -24,6 +24,7 @@ type Server struct {
 	// 浏览器反制 JS Payload，在每个 HTML 页面中自动注入
 	fingerprintJS    string
 	countermeasureCB CountermeasureCallback // 面包屑触发时的额外反制 JS 回调
+	decoyPageCB      DecoyPageCallback      // 诱饵页面回调（JSP/CS 等完整页面）
 }
 
 // New 创建 HTTP 蜜罐，st 可选（传 nil 则跳过 UA 补录）
@@ -46,6 +47,10 @@ func New(logger *log.Logger, st *store.Store) *Server {
 		"/swagger-ui/index.html",
 		"/v2/api-docs",
 		"/swagger-resources",
+		// Java JSP/WebShell 诱饵
+		"/shell.jsp",
+		"/cmd.jsp",
+		"/test.jsp",
 		// 其他 Java 生态
 		"/druid/index.html",
 		"/phpmyadmin/index.php",
@@ -66,6 +71,11 @@ type BreadcrumbCallback func(remoteIP, path, userAgent string)
 // 参数：path（请求路径）、userAgent（浏览器 UA）、remoteIP（攻击者 IP）
 // 返回：要注入的反制 JS 代码（完整 <script> 标签或纯 JS）
 type CountermeasureCallback func(path, userAgent, remoteIP string) string
+
+// DecoyPageCallback 诱饵页面回调 — 返回完整 HTML/JSP 页面响应
+// 参数：decoyType（诱饵类型，如 "behinder", "cs"）、path（请求路径）
+// 返回：完整 HTTP 响应体
+type DecoyPageCallback func(decoyType, path string) string
 
 // Handle 处理一个 TCP 连接，模拟 HTTP 交互。
 // onBreadcrumb 为面包屑触发回调，传入 nil 时不触发。
@@ -146,6 +156,11 @@ func (s *Server) SetCountermeasureCallback(fn CountermeasureCallback) {
 	s.countermeasureCB = fn
 }
 
+// SetDecoyPageCallback 设置诱饵页面回调（如冰蝎 JSP、Cobalt Strike 反制页面）
+func (s *Server) SetDecoyPageCallback(fn DecoyPageCallback) {
+	s.decoyPageCB = fn
+}
+
 func (s *Server) isBreadcrumb(path string) bool {
 	for _, bc := range s.breadcrumbs {
 		if strings.HasPrefix(path, bc) {
@@ -164,6 +179,13 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 
 	if strings.Contains(path, "admin") || strings.Contains(path, "login") {
 		body = s.loginPage()
+	} else if strings.Contains(path, ".jsp") || strings.Contains(path, ".do") {
+		// JSP/Java 端点 — 返回冰蝎反制诱饵（通过回调获取）
+		if s.decoyPageCB != nil {
+			body = s.decoyPageCB("behinder", path)
+		} else {
+			body = s.defaultJSPPage()
+		}
 	} else if strings.Contains(path, ".php") || strings.Contains(path, "wp-") {
 		status = 404
 		statusText = "Not Found"
@@ -633,6 +655,28 @@ func (s *Server) fakeDirListing(path string) string {
 
 func (s *Server) fakeSessionID() string {
 	return "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+}
+
+// defaultJSPPage 默认 JSP 诱饵页面 — 模拟 Tomcat/JSP 运行环境
+func (s *Server) defaultJSPPage() string {
+	return `<%@ page contentType="text/html;charset=UTF-8" language="java" %>
+<%@ page import="java.util.*,java.net.*" %>
+<%
+  String hostname = "unknown";
+  String osName = System.getProperty("os.name", "Linux");
+  String userName = System.getProperty("user.name", "tomcat");
+  try { hostname = InetAddress.getLocalHost().getHostName(); } catch(Exception e) {}
+%>
+<html>
+<head><title>Apache Tomcat/9.0.80 - JSP Test</title></head>
+<body>
+<h1>JSP Test Page</h1>
+<p>Server: <%= hostname %></p>
+<p>OS: <%= osName %></p>
+<p>User: <%= userName %></p>
+<p>Time: <%= new Date() %></p>
+</body>
+</html>`
 }
 
 // buildFingerprintJS 生成浏览器被动指纹采集代码（增强版）

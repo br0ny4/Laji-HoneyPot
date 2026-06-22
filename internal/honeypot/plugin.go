@@ -223,6 +223,13 @@ func (e *Engine) SetCountermeasureProvider(fn func(path, userAgent, remoteIP str
 	}
 }
 
+// SetDecoyPageProvider 注册诱饵页面回调（如冰蝎 JSP、Cobalt Strike 反制页面）
+func (e *Engine) SetDecoyPageProvider(fn httpSvc.DecoyPageCallback) {
+	if e.httpSrv != nil {
+		e.httpSrv.SetDecoyPageCallback(fn)
+	}
+}
+
 func (e *Engine) Start() error {
 	e.logger.Info("honeypot engine started")
 	return nil

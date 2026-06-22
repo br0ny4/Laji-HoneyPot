@@ -450,3 +450,140 @@ func truncate(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
+
+func TestJSPResponse(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:19991")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	logger := log.New("debug")
+	srv := New(logger, nil)
+
+	// 注册诱饵页面回调，模拟 Behinder 诱饵
+	srv.SetDecoyPageCallback(func(decoyType, path string) string {
+		if decoyType == "behinder" {
+			return "BEHINDER_DECOY_PAGE"
+		}
+		return ""
+	})
+
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, nil)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	resp, err := http.Get("http://127.0.0.1:19991/shell.jsp")
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if !contains(bodyStr, "BEHINDER_DECOY_PAGE") {
+		t.Errorf("expected behinder decoy page, got: %s", truncate(bodyStr, 200))
+	}
+}
+
+func TestJSPWithoutDecoyCallback(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:19990")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	logger := log.New("debug")
+	srv := New(logger, nil)
+	// 不设置 DecoyPageCallback，应返回默认 JSP 页面
+
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, nil)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	resp, err := http.Get("http://127.0.0.1:19990/cmd.jsp")
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if !contains(bodyStr, "Apache Tomcat") {
+		t.Errorf("expected default JSP page, got: %s", truncate(bodyStr, 200))
+	}
+	if !contains(bodyStr, "JSP Test Page") {
+		t.Errorf("expected JSP Test Page title, got: %s", truncate(bodyStr, 200))
+	}
+}
+
+func TestNewJSPBreadcrumbPaths(t *testing.T) {
+	srv := New(log.New("debug"), nil)
+
+	jspPaths := []string{
+		"/shell.jsp",
+		"/cmd.jsp",
+		"/test.jsp",
+	}
+	for _, p := range jspPaths {
+		if !srv.isBreadcrumb(p) {
+			t.Errorf("expected %s to be a breadcrumb", p)
+		}
+	}
+	// .jsp sub-paths should also match
+	if !srv.isBreadcrumb("/shell.jsp?cmd=whoami") {
+		t.Error("expected /shell.jsp?cmd=whoami to be breadcrumb")
+	}
+}
+
+func TestDecoyPageCallbackIntegration(t *testing.T) {
+	srv := New(log.New("debug"), nil)
+
+	callCount := 0
+	srv.SetDecoyPageCallback(func(decoyType, path string) string {
+		callCount++
+		return "DECOY_RESPONSE"
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:19989")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, nil)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	resp, err := http.Get("http://127.0.0.1:19989/test.jsp")
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if callCount == 0 {
+		t.Error("expected DecoyPageCallback to be called")
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !contains(string(body), "DECOY_RESPONSE") {
+		t.Error("expected DECOY_RESPONSE in body")
+	}
+}

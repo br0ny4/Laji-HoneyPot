@@ -65,6 +65,14 @@ func main() {
 		return trEngine.SelectPayload(path, userAgent, remoteIP)
 	})
 
+	// 诱饵页面回调：JSP/Java 端点返回冰蝎反制诱饵
+	hpEngine.SetDecoyPageProvider(func(decoyType, path string) string {
+		if decoyType == "behinder" {
+			return trEngine.BehinderDecoyPage()
+		}
+		return ""
+	})
+
 	// API 服务器（含 SSE），支持优雅关闭
 	wsHub := api.NewWSHub(logger, st)
 

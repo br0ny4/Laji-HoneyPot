@@ -3,8 +3,10 @@ package traceability
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
+	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
@@ -159,5 +161,66 @@ func TestAllPayloadsNonEmpty(t *testing.T) {
 		if !strings.Contains(p, "<script>") {
 			t.Errorf("%s payload missing <script> tag", name)
 		}
+	}
+}
+
+func TestNVDUpdateIntervalInit(t *testing.T) {
+	tests := []struct {
+		name     string
+		interval string
+		expected time.Duration
+	}{
+		{"default 24h", "", 24 * time.Hour},
+		{"explicit 24h", "24h", 24 * time.Hour},
+		{"1 hour", "1h", 1 * time.Hour},
+		{"6 hours", "6h", 6 * time.Hour},
+		{"30 minutes", "30m", 30 * time.Minute},
+		{"invalid falls back to 24h", "abc", 24 * time.Hour},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newTestEngine()
+			cfg := config.Section{}
+			if tt.interval != "" {
+				cfg["update_interval"] = tt.interval
+			}
+			if err := e.Init(cfg); err != nil {
+				t.Fatalf("init failed: %v", err)
+			}
+			if e.updateInterval != tt.expected {
+				t.Errorf("expected interval %v, got %v", tt.expected, e.updateInterval)
+			}
+			if e.stopCh == nil {
+				t.Error("expected stopCh to be initialized")
+			}
+		})
+	}
+}
+
+func TestNVDStopSignal(t *testing.T) {
+	e := newTestEngine()
+	cfg := config.Section{"update_interval": "1h"}
+	if err := e.Init(cfg); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	if e.stopCh == nil {
+		t.Fatal("expected stopCh to be initialized")
+	}
+
+	// 验证 stopCh 可以正常关闭（不阻塞）
+	if err := e.Stop(); err != nil {
+		t.Fatalf("stop failed: %v", err)
+	}
+
+	// 验证关闭的 channel 可以读取到零值
+	select {
+	case _, ok := <-e.stopCh:
+		if ok {
+			t.Error("expected stopCh to be closed")
+		}
+	default:
+		t.Error("expected stopCh to be readable after close")
 	}
 }

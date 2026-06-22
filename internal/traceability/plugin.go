@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
@@ -17,12 +18,14 @@ import (
 // Engine 溯源反制引擎插件
 type Engine struct {
 	plugin.Base
-	logger     *log.Logger
-	bus        *bus.Bus
-	vulnDB     *vulndb.DB
-	crawler    *vulndb.NVDCrawler
-	collector  *fingerprint.Collector
-	payloadGen *payload.Generator
+	logger         *log.Logger
+	bus            *bus.Bus
+	vulnDB         *vulndb.DB
+	crawler        *vulndb.NVDCrawler
+	collector      *fingerprint.Collector
+	payloadGen     *payload.Generator
+	updateInterval time.Duration // NVD 爬虫定期更新间隔，0 表示不启用定期更新
+	stopCh         chan struct{} // 停止定期更新的信号
 }
 
 // NewEngine 创建溯源反制引擎
@@ -34,6 +37,7 @@ func NewEngine(logger *log.Logger, bus *bus.Bus) *Engine {
 		crawler:    vulndb.NewNVDCrawler(logger, ""),
 		collector:  fingerprint.NewCollector(logger),
 		payloadGen: payload.NewGenerator(logger, "http://localhost:8080"),
+		stopCh:     make(chan struct{}),
 	}
 
 	// 订阅蜜罐引擎的连接事件
@@ -48,6 +52,22 @@ func (e *Engine) Name() string    { return "traceability-engine" }
 func (e *Engine) Version() string { return "0.4.0" }
 
 func (e *Engine) Init(cfg config.Section) error {
+	// 读取 NVD 更新间隔配置（默认 24h）
+	intervalStr := cfg.Get("update_interval")
+	if intervalStr != "" {
+		if d, err := time.ParseDuration(intervalStr); err == nil && d > 0 {
+			e.updateInterval = d
+			e.logger.Infow("nvd periodic update enabled", "interval", d.String())
+		} else {
+			e.logger.Warnw("invalid update_interval, fallback to 24h",
+				"value", intervalStr, "error", err)
+			e.updateInterval = 24 * time.Hour
+		}
+	} else {
+		e.updateInterval = 24 * time.Hour
+	}
+
+	e.stopCh = make(chan struct{})
 	e.logger.Info("traceability engine initialized")
 	return nil
 }
@@ -56,22 +76,51 @@ func (e *Engine) Start() error {
 	e.logger.Info("traceability engine started")
 
 	// 后台异步拉取最新漏洞情报
-	go func() {
-		entries, err := e.crawler.FetchRecent(vulndb.RedTeamKeywords)
-		if err != nil {
-			e.logger.Warnw("nvd crawl failed", "error", err)
-			return
-		}
-		for _, entry := range entries {
-			e.vulnDB.Add(entry)
-		}
-		e.logger.Infow("nvd crawl complete", "new_entries", len(entries))
-	}()
+	go e.fetchAndStoreNVD()
+
+	// 定期更新 NVD 漏洞库
+	if e.updateInterval > 0 {
+		go e.periodicNVDUpdate()
+	}
 
 	return nil
 }
 
+// fetchAndStoreNVD 拉取 NVD 漏洞数据并存入漏洞库
+func (e *Engine) fetchAndStoreNVD() {
+	entries, err := e.crawler.FetchRecent(vulndb.RedTeamKeywords)
+	if err != nil {
+		e.logger.Warnw("nvd crawl failed", "error", err)
+		return
+	}
+	for _, entry := range entries {
+		e.vulnDB.Add(entry)
+	}
+	e.logger.Infow("nvd crawl complete", "new_entries", len(entries))
+}
+
+// periodicNVDUpdate 定期更新 NVD 漏洞库
+func (e *Engine) periodicNVDUpdate() {
+	ticker := time.NewTicker(e.updateInterval)
+	defer ticker.Stop()
+
+	e.logger.Infow("nvd periodic update started", "interval", e.updateInterval.String())
+
+	for {
+		select {
+		case <-ticker.C:
+			e.logger.Info("nvd periodic update triggered")
+			e.fetchAndStoreNVD()
+		case <-e.stopCh:
+			e.logger.Info("nvd periodic update stopped")
+			return
+		}
+	}
+}
+
 func (e *Engine) Stop() error {
+	e.logger.Info("traceability engine stopping")
+	close(e.stopCh)
 	e.logger.Info("traceability engine stopped")
 	return nil
 }
@@ -122,6 +171,11 @@ func (e *Engine) GetCollector() *fingerprint.Collector { return e.collector }
 
 // GetPayloadGen 暴露 Payload 生成器
 func (e *Engine) GetPayloadGen() *payload.Generator { return e.payloadGen }
+
+// BehinderDecoyPage 返回冰蝎 Java JSP 反制诱饵页面
+func (e *Engine) BehinderDecoyPage() string {
+	return e.payloadGen.GenerateBehinderDecoy()
+}
 
 // SelectPayload 智能载荷选择器 — 根据攻击上下文选择最优反制 Payload
 //
@@ -350,4 +404,14 @@ if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};
 setTimeout(function(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))},1500)}catch(e){
 new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}})();
 </script>`)
+}
+
+// csXSSPayload Cobalt Strike XSS 反制（CVE-2022-39197）— 通过 payload 生成器
+func (e *Engine) csXSSPayload() string {
+	return e.payloadGen.GenerateCSXSSPayload()
+}
+
+// behinderDecoyPayload 冰蝎/Java JSP 反制诱饵 — 通过 payload 生成器
+func (e *Engine) behinderDecoyPayload() string {
+	return e.payloadGen.GenerateBehinderDecoy()
 }
