@@ -248,8 +248,6 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 			"Connection: %s\r\n"+
 			"ETag: %s\r\n"+
 			"Last-Modified: %s\r\n"+
-			"Cache-Control: no-cache\r\n"+
-			"Pragma: no-cache\r\n"+
 			"X-Frame-Options: SAMEORIGIN\r\n"+
 			"X-Content-Type-Options: nosniff\r\n"+
 			"Vary: Accept-Encoding\r\n"+
@@ -264,6 +262,16 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 		lastMod,
 		s.fakeSessionID(),
 	)
+
+	// heapdump 下载: 添加 Content-Disposition 等头
+	if strings.Contains(path, "heapdump") {
+		for k, v := range s.heapDumpExtraHeaders() {
+			resp += fmt.Sprintf("%s: %s\r\n", k, v)
+		}
+	} else {
+		resp += fmt.Sprintf("Cache-Control: no-cache\r\n" +
+			"Pragma: no-cache\r\n")
+	}
 
 	// 目录列表页加上额外的 headers（Apache 风格）
 	if isDirListing {
@@ -429,10 +437,19 @@ func (s *Server) fakeActuatorResponse(path string) string {
 	return fmt.Sprintf(`{"_links":{"self":{"href":"http://localhost:8080/actuator","templated":false},"env":{"href":"http://localhost:8080/actuator/env","templated":false},"env-toMatch":{"href":"http://localhost:8080/actuator/env/{toMatch}","templated":true},"heapdump":{"href":"http://localhost:8080/actuator/heapdump","templated":false},"mappings":{"href":"http://localhost:8080/actuator/mappings","templated":false},"beans":{"href":"http://localhost:8080/actuator/beans","templated":false},"configprops":{"href":"http://localhost:8080/actuator/configprops","templated":false}}}`)
 }
 
-// fakeHeapDump 伪造一个假的 JVM heap dump 文件（最小化二进制头 + 诱饵数据）
+// fakeHeapDump 伪造一个假的 JVM heap dump 文件，内含丰富诱饵数据
+//
+// 反制链设计：
+//
+//	攻击者访问 /actuator/heapdump  →  触发面包屑（记录攻击事件）
+//	→  下载 heapdump.hprof 文件  →  用 MAT/VisualVM 分析
+//	→  发现堆中的"敏感凭证"  →  尝试 SSH/MySQL/Redis 登录
+//	→  触碰其他蜜罐服务  →  全部被记录追踪
+//
+// HPROF 格式: header + 多条 STRING record (tag=0x01)，每条包含不同类别的蜜标
 func (s *Server) fakeHeapDump() string {
-	// 构造一个假的 HPROF 格式二进制头，攻击者下载后可识别为 heap dump
-	// HPROF header: "JAVA PROFILE 1.0.2\0" + 4 bytes ID size + 8 bytes timestamp
+	// ========== HPROF Header ==========
+	// "JAVA PROFILE 1.0.2\0" + 4 bytes ID size + 8 bytes timestamp
 	hprofHeader := []byte("JAVA PROFILE 1.0.2")
 	hprofHeader = append(hprofHeader, 0)          // null terminator
 	hprofHeader = append(hprofHeader, 0, 0, 0, 4) // ID size = 4
@@ -441,14 +458,94 @@ func (s *Server) fakeHeapDump() string {
 		byte(ts>>56), byte(ts>>48), byte(ts>>40), byte(ts>>32),
 		byte(ts>>24), byte(ts>>16), byte(ts>>8), byte(ts),
 	)
-	// 注入蜜标数据: STRING record with fake credentials
-	fakeString := "JDBC_URL=jdbc:mysql://10.0.1.50:3306/prod_db?user=root&password=HoneyPot@2024"
-	strBytes := []byte(fakeString)
-	record := []byte{0x01}                                  // STRING tag
-	record = append(record, 0, 0, 0, byte(len(strBytes)+4)) // time (4 bytes)
-	record = append(record, 0, 0, 0, 1)                     // string ID
-	record = append(record, strBytes...)
-	return string(append(hprofHeader, record...))
+
+	// ========== 蜜标字符串数据（模拟 JVM 堆中的对象） ==========
+	// 每条 STRING record: tag(1) + time(4) + id(4) + utf8data
+	// 使用递增的 string ID，模拟真实堆中字符串常量池
+
+	baitStrings := []struct {
+		id   int
+		data string
+	}{
+		// 1. 数据库连接池配置 (HikariCP DataSource)
+		{1, "HikariPool-1 - Starting... jdbc:mysql://10.0.1.50:3306/prod_db?useSSL=false&serverTimezone=UTC"},
+		{2, "HikariCP - connectionTimeout=30000, maximumPoolSize=50, username=root, password=SpringBoot@Prod2024!"},
+
+		// 2. Redis 连接配置 (Lettuce/Jedis)
+		{3, "LettuceConnectionFactory - RedisURI redis://:Redis@Internal2024@10.0.1.60:6379/0"},
+		{4, "RedisConfig - master=redis-master.internal.local, sentinel=10.0.1.61:26379"},
+
+		// 3. SSH 服务配置 — 攻击者获取后可能尝试 SSH 登录，触发 SSH 蜜罐
+		{5, "SshExecCommand - ssh -p 2222 deploy@10.0.1.70 -i /home/deploy/.ssh/id_rsa"},
+		{6, "ServerConfig - prod-server-01 (10.0.1.70:2222) user:deploy key:/home/deploy/.ssh/deploy_key"},
+
+		// 4. SSH 私钥片段 — 模拟对象中残留的密钥数据
+		{7, `-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn
+NhAAAAAwEAAQAAAYEA0Z3MzFzK1Qx5kG2V7N0cKjFzrH8qPQr1W9dAeBb1R2jUvK9tF0sW
+x8qLmN4oP5rS7tU9vW0xYzA1Q2sD4fG6hJ7kL8mN0oP0qR4sT5uV6wW7xX8yY0zA1B2cC3
+-----END OPENSSH PRIVATE KEY-----`},
+
+		// 5. AWS S3 凭证 — 诱导攻击者访问伪造的 S3 端点
+		{8, "DefaultAWSCredentialsProviderChain - AccessKeyId=AKIAIOSFODNN7EXAMPLE, SecretKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY, Region=us-east-1"},
+		{9, "S3Client - bucket=prod-uploads-bucket, endpoint=https://s3.us-east-1.amazonaws.com"},
+
+		// 6. JWT 签名密钥 — 攻击者可伪造 JWT Token
+		{10, "JwtTokenProvider - secret=prod-jwt-secret-key-2024-hp-hmac-sha256, expiration=86400000ms, issuer=internal-auth-service"},
+		{11, "AuthToken - Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJST0xFX0FETUlOIiwiaWF0IjoxNzE5MDAwMDAwfQ.hp_fake_signature"},
+
+		// 7. 内部 API 端点 — 诱导攻击者探测内网
+		{12, "RestTemplate - GET http://10.0.1.80:8080/api/internal/admin/users?apiKey=internal-api-key-2024"},
+		{13, "FeignClient - InventoryService http://inventory.internal.local:8080/api/v2/stock"},
+		{14, "WebClient - POST http://10.0.1.90:8080/api/internal/data/sync"},
+
+		// 8. Kubernetes/容器配置
+		{15, "KubeConfig - server: https://10.0.1.100:6443, namespace: production, token: k8s-token-hp-eyJhbGciOiJSUzI1NiJ9..."},
+		{16, "DockerRegistry - registry.internal.local:5000, user: ci-bot, pass: Docker@Registry2024"},
+
+		// 9. 日志中的敏感信息
+		{17, "ERROR - Failed to rotate secret for service=payment-gateway, key=sk-live-payment-hp-a1b2c3d4e5f6g7h8"},
+		{18, "INFO - LDAP bind success: ldap://10.0.1.110:3890/dc=internal,dc=local cn=admin,dc=internal,dc=local"},
+	}
+
+	records := make([]byte, 0)
+	for _, bs := range baitStrings {
+		data := []byte(bs.data)
+		// STRING record: tag(1) + time(4) + id(4) + data
+		rec := make([]byte, 1+4+4+len(data))
+		rec[0] = 0x01 // STRING tag
+		// time: use current timestamp (4 bytes: seconds since epoch)
+		sec := uint32(time.Now().Unix())
+		rec[1] = byte(sec >> 24)
+		rec[2] = byte(sec >> 16)
+		rec[3] = byte(sec >> 8)
+		rec[4] = byte(sec)
+		// string ID
+		rec[5] = byte(bs.id >> 24)
+		rec[6] = byte(bs.id >> 16)
+		rec[7] = byte(bs.id >> 8)
+		rec[8] = byte(bs.id)
+		copy(rec[9:], data)
+		records = append(records, rec...)
+	}
+
+	return string(append(hprofHeader, records...))
+}
+
+// heapDumpFileName 返回 heapdump 下载文件名
+func (s *Server) heapDumpFileName() string {
+	return fmt.Sprintf("heapdump-%s.hprof", time.Now().Format("20060102-150405"))
+}
+
+// buildHeapDumpExtraHeaders 构建 heapdump 下载所需的额外 HTTP 头
+func (s *Server) heapDumpExtraHeaders() map[string]string {
+	return map[string]string{
+		"Content-Disposition":       fmt.Sprintf("attachment; filename=\"%s\"", s.heapDumpFileName()),
+		"Content-Transfer-Encoding": "binary",
+		"Cache-Control":             "no-store, must-revalidate",
+		"Pragma":                    "no-cache",
+		"Expires":                   "0",
+	}
 }
 
 // swaggerUIPage 伪造 Swagger UI 页面，未授权即可浏览 API

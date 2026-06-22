@@ -249,6 +249,7 @@ func TestActuatorHeapdumpResponse(t *testing.T) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
 
 	if resp.StatusCode != 200 {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
@@ -257,11 +258,62 @@ func TestActuatorHeapdumpResponse(t *testing.T) {
 	if !contains(ct, "application/octet-stream") {
 		t.Errorf("expected octet-stream content-type, got %s", ct)
 	}
-	if !contains(string(body), "JAVA PROFILE") {
+
+	// 验证 Content-Disposition 下载头
+	cd := resp.Header.Get("Content-Disposition")
+	if !contains(cd, "attachment") {
+		t.Errorf("expected Content-Disposition: attachment, got %s", cd)
+	}
+	if !contains(cd, "heapdump-") {
+		t.Errorf("expected heapdump filename in Content-Disposition, got %s", cd)
+	}
+	if !contains(cd, ".hprof") {
+		t.Errorf("expected .hprof suffix in filename, got %s", cd)
+	}
+
+	// 验证 HPROF 头和蜜标数据
+	if !contains(bodyStr, "JAVA PROFILE") {
 		t.Error("expected HPROF header in heapdump")
 	}
-	if !contains(string(body), "HoneyPot@2024") {
-		t.Errorf("expected honeytoken in heapdump, got: %s", truncate(string(body), 200))
+
+	// 数据库蜜标
+	if !contains(bodyStr, "SpringBoot@Prod2024") {
+		t.Error("expected database password honeytoken in heapdump")
+	}
+	// Redis 蜜标
+	if !contains(bodyStr, "Redis@Internal2024") {
+		t.Error("expected Redis password honeytoken in heapdump")
+	}
+	// SSH 蜜标
+	if !contains(bodyStr, "OPENSSH PRIVATE KEY") {
+		t.Error("expected SSH private key honeytoken in heapdump")
+	}
+	if !contains(bodyStr, "deploy@10.0.1.70") {
+		t.Error("expected SSH server config honeytoken in heapdump")
+	}
+	// AWS 蜜标
+	if !contains(bodyStr, "AKIAIOSFODNN7EXAMPLE") {
+		t.Error("expected AWS access key honeytoken in heapdump")
+	}
+	// JWT 蜜标
+	if !contains(bodyStr, "prod-jwt-secret-key-2024") {
+		t.Error("expected JWT secret honeytoken in heapdump")
+	}
+	// K8s 蜜标
+	if !contains(bodyStr, "k8s-token-hp-") {
+		t.Error("expected Kubernetes token honeytoken in heapdump")
+	}
+	// Docker Registry 蜜标
+	if !contains(bodyStr, "Docker@Registry2024") {
+		t.Error("expected Docker Registry honeytoken in heapdump")
+	}
+	// 内部 API 蜜标
+	if !contains(bodyStr, "10.0.1.80:8080") {
+		t.Error("expected internal API endpoint honeytoken in heapdump")
+	}
+	// LDAP 蜜标
+	if !contains(bodyStr, "ldap://10.0.1.110:3890") {
+		t.Error("expected LDAP honeytoken in heapdump")
 	}
 }
 
