@@ -35,8 +35,18 @@ func New(logger *log.Logger, st *store.Store) *Server {
 		"/api/v1/internal/users",
 		"/backup/database.sql",
 		"/debug/pprof/",
+		// Spring Boot Actuator 未授权访问
 		"/actuator/env",
+		"/actuator/heapdump",
+		"/actuator/mappings",
+		"/actuator/beans",
+		"/actuator/configprops",
+		// Swagger 未授权访问
 		"/swagger-ui.html",
+		"/swagger-ui/index.html",
+		"/v2/api-docs",
+		"/swagger-resources",
+		// 其他 Java 生态
 		"/druid/index.html",
 		"/phpmyadmin/index.php",
 	}
@@ -158,7 +168,23 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 		status = 404
 		statusText = "Not Found"
 		body = s.errorPage(404)
-	} else if strings.Contains(path, "api") || strings.Contains(path, "swagger") || strings.Contains(path, "actuator") {
+	} else if strings.Contains(path, "actuator") {
+		// Spring Boot Actuator 未授权访问 — 返回真实 actuator JSON
+		contentType = "application/vnd.spring-boot.actuator.v3+json"
+		if strings.Contains(path, "heapdump") {
+			contentType = "application/octet-stream"
+			body = s.fakeHeapDump()
+		} else {
+			body = s.fakeActuatorResponse(path)
+		}
+	} else if strings.Contains(path, "swagger-ui") {
+		// Swagger UI 页面 — HTML
+		body = s.swaggerUIPage()
+	} else if strings.Contains(path, "api-docs") || strings.Contains(path, "swagger-resources") {
+		// Swagger API 文档 — JSON
+		contentType = "application/json"
+		body = s.fakeSwaggerDocs(path)
+	} else if strings.Contains(path, "api") || strings.Contains(path, "swagger") {
 		contentType = "application/json"
 		body = s.fakeAPIResponse(path)
 	} else if strings.Contains(path, ".git") || strings.Contains(path, "backup") || strings.Contains(path, ".sql") {
@@ -279,6 +305,278 @@ func (s *Server) loginPage() string {
 
 func (s *Server) fakeAPIResponse(path string) string {
 	return fmt.Sprintf(`{"status":"ok","path":"%s","version":"2.0.1","timestamp":"%s","internal_ip":"10.0.1.100"}`, path, time.Now().Format(time.RFC3339))
+}
+
+// fakeActuatorResponse 伪造 Spring Boot Actuator 未授权访问响应
+// 根据路径返回不同的 actuator 端点数据，诱导攻击者探测更多信息
+func (s *Server) fakeActuatorResponse(path string) string {
+	t := time.Now().UTC().Format(time.RFC3339)
+
+	switch {
+	case strings.Contains(path, "env") || strings.Contains(path, "environment"):
+		return fmt.Sprintf(`{
+  "activeProfiles": ["prod"],
+  "propertySources": [
+    {"name": "server.ports", "properties": {"local.server.port": {"value": "8080","origin": "class path resource [application-prod.yml]"}}},
+    {"name": "applicationConfig: [classpath:/application-prod.yml]", "properties": {
+      "spring.datasource.url": {"value": "jdbc:mysql://10.0.1.50:3306/prod_db?useSSL=false","origin": "class path resource [application-prod.yml]"},
+      "spring.datasource.username": {"value": "root","origin": "class path resource [application-prod.yml]"},
+      "spring.datasource.password": {"value": "********","origin": "class path resource [application-prod.yml]"},
+      "spring.redis.host": {"value": "10.0.1.60","origin": "class path resource [application-prod.yml]"},
+      "spring.redis.password": {"value": "********","origin": "class path resource [application-prod.yml]"},
+      "jwt.secret": {"value": "prod-jwt-secret-key-2024","origin": "class path resource [application-prod.yml]"},
+      "cloud.aws.credentials.accessKey": {"value": "AKIAIOSFODNN7EXAMPLE","origin": "class path resource [application-prod.yml]"},
+      "cloud.aws.credentials.secretKey": {"value": "********","origin": "class path resource [application-prod.yml]"},
+      "management.endpoints.web.exposure.include": {"value": "*","origin": "class path resource [application-prod.yml]"},
+      "server.error.include-stacktrace": {"value": "always","origin": "class path resource [application-prod.yml]"}
+    }}
+  ],
+  "timestamp": "%s"
+}`, t)
+
+	case strings.Contains(path, "mappings"):
+		return fmt.Sprintf(`{
+  "contexts": {
+    "application": {
+      "mappings": {
+        "dispatcherServlets": {
+          "dispatcherServlet": [
+            {"handler": "org.springframework.boot.actuate.endpoint.web.servlet.AbstractWebMvcEndpointHandlerMapping$OperationHandler","predicate": "{GET [/actuator/env], produces [application/vnd.spring-boot.actuator.v3+json]}"},
+            {"handler": "org.springframework.boot.actuate.endpoint.web.servlet.AbstractWebMvcEndpointHandlerMapping$OperationHandler","predicate": "{GET [/actuator/heapdump], produces [application/octet-stream]}"},
+            {"handler": "org.springframework.boot.actuate.endpoint.web.servlet.AbstractWebMvcEndpointHandlerMapping$OperationHandler","predicate": "{GET [/actuator/mappings], produces [application/vnd.spring-boot.actuator.v3+json]}"},
+            {"handler": "com.example.internal.AdminController#deleteUser(Long)","predicate": "{POST [/api/internal/admin/users/delete]}"},
+            {"handler": "com.example.internal.DataController#exportAll()","predicate": "{GET [/api/internal/data/export]}"},
+            {"handler": "com.example.internal.ConfigController#getSecrets()","predicate": "{GET [/api/internal/config/secrets]}"},
+            {"handler": "com.example.controller.UserController#login(UserDto)","predicate": "{POST [/api/v1/user/login]}"},
+            {"handler": "com.example.controller.OrderController#list()","predicate": "{GET [/api/v1/orders]}"}
+          ]
+        },
+        "servletFilters": [
+          {"name": "securityFilterChain","class": "org.springframework.security.web.FilterChainProxy"},
+          {"name": "requestContextFilter","class": "org.springframework.web.filter.RequestContextFilter"}
+        ],
+        "parentId": null
+      }
+    }
+  },
+  "timestamp": "%s"
+}`, t)
+
+	case strings.Contains(path, "beans"):
+		return fmt.Sprintf(`{
+  "contexts": {
+    "application": {
+      "beans": {
+        "dataSource": {"aliases": [],"scope": "singleton","type": "com.zaxxer.hikari.HikariDataSource","resource": "class path resource [org/springframework/boot/autoconfigure/jdbc/DataSourceConfiguration$Hikari.class]","dependencies": ["dataSourceProperties"]},
+        "jwtTokenProvider": {"aliases": [],"scope": "singleton","type": "com.example.internal.security.JwtTokenProvider","resource": "file [/app/classes/com/example/internal/security/JwtTokenProvider.class]","dependencies": ["jwtProperties","userDetailsServiceImpl"]},
+        "redisTemplate": {"aliases": [],"scope": "singleton","type": "org.springframework.data.redis.core.RedisTemplate","resource": "class path resource [org/springframework/boot/autoconfigure/data/redis/RedisAutoConfiguration.class]","dependencies": ["redisConnectionFactory"]},
+        "adminUserController": {"aliases": [],"scope": "singleton","type": "com.example.internal.AdminController","resource": "file [/app/classes/com/example/internal/AdminController.class]","dependencies": ["userRepository","auditLogger"]}
+      },
+      "parentId": null
+    }
+  },
+  "timestamp": "%s"
+}`, t)
+
+	case strings.Contains(path, "configprops"):
+		return fmt.Sprintf(`{
+  "contexts": {
+    "application": {
+      "beans": {
+        "spring.datasource-org.springframework.boot.autoconfigure.jdbc.DataSourceProperties": {
+          "prefix": "spring.datasource","properties": {
+            "url": "jdbc:mysql://10.0.1.50:3306/prod_db?useSSL=false",
+            "username": "root",
+            "password": "******",
+            "driverClassName": "com.mysql.cj.jdbc.Driver",
+            "hikari": {"maximumPoolSize": 50,"minimumIdle": 10,"connectionTimeout": 30000,"maxLifetime": 1800000}
+          }
+        },
+        "spring.redis-org.springframework.boot.autoconfigure.data.redis.RedisProperties": {
+          "prefix": "spring.redis","properties": {
+            "host": "10.0.1.60","port": 6379,"password": "******","database": 0,"timeout": 3000
+          }
+        }
+      },
+      "parentId": null
+    }
+  }
+}`)
+	}
+
+	return fmt.Sprintf(`{"_links":{"self":{"href":"http://localhost:8080/actuator","templated":false},"env":{"href":"http://localhost:8080/actuator/env","templated":false},"env-toMatch":{"href":"http://localhost:8080/actuator/env/{toMatch}","templated":true},"heapdump":{"href":"http://localhost:8080/actuator/heapdump","templated":false},"mappings":{"href":"http://localhost:8080/actuator/mappings","templated":false},"beans":{"href":"http://localhost:8080/actuator/beans","templated":false},"configprops":{"href":"http://localhost:8080/actuator/configprops","templated":false}}}`)
+}
+
+// fakeHeapDump 伪造一个假的 JVM heap dump 文件（最小化二进制头 + 诱饵数据）
+func (s *Server) fakeHeapDump() string {
+	// 构造一个假的 HPROF 格式二进制头，攻击者下载后可识别为 heap dump
+	// HPROF header: "JAVA PROFILE 1.0.2\0" + 4 bytes ID size + 8 bytes timestamp
+	hprofHeader := []byte("JAVA PROFILE 1.0.2")
+	hprofHeader = append(hprofHeader, 0)          // null terminator
+	hprofHeader = append(hprofHeader, 0, 0, 0, 4) // ID size = 4
+	ts := time.Now().UnixMilli()
+	hprofHeader = append(hprofHeader,
+		byte(ts>>56), byte(ts>>48), byte(ts>>40), byte(ts>>32),
+		byte(ts>>24), byte(ts>>16), byte(ts>>8), byte(ts),
+	)
+	// 注入蜜标数据: STRING record with fake credentials
+	fakeString := "JDBC_URL=jdbc:mysql://10.0.1.50:3306/prod_db?user=root&password=HoneyPot@2024"
+	strBytes := []byte(fakeString)
+	record := []byte{0x01}                                  // STRING tag
+	record = append(record, 0, 0, 0, byte(len(strBytes)+4)) // time (4 bytes)
+	record = append(record, 0, 0, 0, 1)                     // string ID
+	record = append(record, strBytes...)
+	return string(append(hprofHeader, record...))
+}
+
+// swaggerUIPage 伪造 Swagger UI 页面，未授权即可浏览 API
+func (s *Server) swaggerUIPage() string {
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Swagger UI</title>
+  <link rel="stylesheet" type="text/css" href="./swagger-ui.css">
+  <link rel="icon" type="image/png" href="./favicon-32x32.png" sizes="32x32">
+  <style>html{box-sizing:border-box;overflow:-moz-scrollbars-vertical;overflow-y:scroll}*,:after,:before{box-sizing:inherit}body{margin:0;background:#fafafa}</style>
+</head>
+<body>
+  <div id="swagger-ui">
+    <div class="swagger-ui">
+      <div class="topbar">
+        <div class="wrapper">
+          <div class="topbar-wrapper">
+            <span>Select a spec: </span>
+            <select id="select">
+              <option value="/v2/api-docs">Default (v2/api-docs)</option>
+              <option value="/v2/api-docs?group=internal">Internal API (v2/api-docs?group=internal)</option>
+              <option value="/v2/api-docs?group=admin">Admin API (v2/api-docs?group=admin)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="api-doc-container">
+        <div class="info">
+          <hgroup class="main">
+            <h2 class="title">Internal API Documentation
+              <span><a href="#/"><span class="version">v2.1.0</span></a></span>
+            </h2>
+          </hgroup>
+          <div class="description"><p>REST API for internal microservices. Authentication: Bearer token (JWT) or API Key.<br/>
+          <strong>Default access: all endpoints require <code>Authorization</code> header.</strong></p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    // Swagger UI bootstrap — 加载真实 API 文档
+    window.onload = function() {
+      fetch('/swagger-resources')
+        .then(function(r) { return r.json() })
+        .then(function(data) {
+          if (data && data.length) {
+            var url = data[0].url || '/v2/api-docs';
+            fetch(url).then(function(r) { return r.json() }).then(function(sw) {
+              var pre = document.createElement('pre');
+              pre.style.cssText = 'margin:20px;background:#f4f4f4;padding:15px;border-radius:4px;font-size:13px';
+              pre.textContent = JSON.stringify(sw, null, 2);
+              document.getElementById('api-doc-container').appendChild(pre);
+            });
+          }
+        });
+    };
+  </script>
+</body>
+</html>`
+}
+
+// fakeSwaggerDocs 伪造 Swagger/OpenAPI 文档，泄露内网 API 端点
+func (s *Server) fakeSwaggerDocs(path string) string {
+	if strings.Contains(path, "swagger-resources") {
+		return `[{"name":"default","url":"/v2/api-docs","swaggerVersion":"2.0","location":"/v2/api-docs"},{"name":"internal","url":"/v2/api-docs?group=internal","swaggerVersion":"2.0","location":"/v2/api-docs?group=internal"},{"name":"admin","url":"/v2/api-docs?group=admin","swaggerVersion":"2.0","location":"/v2/api-docs?group=admin"}]`
+	}
+
+	return fmt.Sprintf(`{
+  "swagger": "2.0",
+  "info": {"title": "Internal Service API","version": "2.1.0","description": "Backend microservice API documentation"},
+  "host": "localhost:8080","basePath": "/","schemes": ["http","https"],
+  "securityDefinitions": {
+    "BearerAuth": {"type": "apiKey","name": "Authorization","in": "header","description": "JWT Bearer token: Bearer <token>"},
+    "ApiKeyAuth": {"type": "apiKey","name": "X-API-Key","in": "header","description": "API Key for service-to-service calls"}
+  },
+  "paths": {
+    "/api/v1/user/login": {
+      "post": {
+        "tags": ["User"],"summary": "User login","produces": ["application/json"],
+        "parameters": [
+          {"in": "body","name": "body","schema": {"$ref": "#/definitions/LoginRequest"}}
+        ],
+        "responses": {
+          "200": {"description": "Login success","schema": {"$ref": "#/definitions/LoginResponse"}},
+          "401": {"description": "Invalid credentials"}
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "get": {
+        "tags": ["Order"],"summary": "List all orders","security": [{"BearerAuth": []},{"ApiKeyAuth": []}],
+        "produces": ["application/json"],
+        "responses": {"200": {"description": "Order list","schema": {"type": "array","items": {"$ref": "#/definitions/Order"}}}}
+      }
+    },
+    "/api/internal/admin/users": {
+      "get": {
+        "tags": ["Admin"],"summary": "List all users (internal)","security": [{"ApiKeyAuth": []}],
+        "produces": ["application/json"],
+        "responses": {"200": {"description": "User list"}}
+      }
+    },
+    "/api/internal/admin/users/delete": {
+      "post": {
+        "tags": ["Admin"],"summary": "Delete user by ID (internal)","security": [{"ApiKeyAuth": []}],
+        "parameters": [{"in": "query","name": "id","type": "integer","required": true}],
+        "responses": {"200": {"description": "User deleted"}}
+      }
+    },
+    "/api/internal/data/export": {
+      "get": {
+        "tags": ["Data"],"summary": "Export all data (internal)","security": [{"ApiKeyAuth": []}],
+        "produces": ["application/octet-stream"],
+        "responses": {"200": {"description": "Data export file"}}
+      }
+    },
+    "/api/internal/config/secrets": {
+      "get": {
+        "tags": ["Config"],"summary": "Get internal secrets (internal)","security": [{"ApiKeyAuth": []}],
+        "responses": {"200": {"description": "Secrets configuration"}}
+      }
+    }
+  },
+  "definitions": {
+    "LoginRequest": {
+      "type": "object","required": ["username","password"],
+      "properties": {
+        "username": {"type": "string","example": "admin"},
+        "password": {"type": "string","example": "P@ssw0rd"}
+      }
+    },
+    "LoginResponse": {
+      "type": "object",
+      "properties": {
+        "token": {"type": "string","example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."},
+        "refreshToken": {"type": "string","example": "dGhpcyBpcyBhIGZha2UgcmVmcmVzaCB0b2tlbg=="},
+        "expiresIn": {"type": "integer","example": 3600}
+      }
+    },
+    "Order": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "integer"},"userId": {"type": "integer"},"amount": {"type": "number"},"status": {"type": "string"}
+      }
+    }
+  },
+  "timestamp": "%s"
+}`, time.Now().UTC().Format(time.RFC3339))
 }
 
 func (s *Server) errorPage(code int) string {

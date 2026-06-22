@@ -185,8 +185,8 @@ func TestGetStatsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get stats: %v", err)
 	}
-	if stats.ActiveServices != 7 {
-		t.Errorf("expected fallback 7 services, got %d", stats.ActiveServices)
+	if stats.ActiveServices != 9 {
+		t.Errorf("expected fallback 9 services, got %d", stats.ActiveServices)
 	}
 	if stats.TodayConns != 0 {
 		t.Errorf("expected 0 conns, got %d", stats.TodayConns)

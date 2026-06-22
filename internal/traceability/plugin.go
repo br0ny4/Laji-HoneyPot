@@ -1,6 +1,7 @@
 package traceability
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -77,14 +78,40 @@ func (e *Engine) Stop() error {
 
 func (e *Engine) onConnection(evt bus.Event) {
 	e.collector.RecordConnection(string(evt.Payload))
+	e.logger.Infow("connection event", "payload", string(evt.Payload))
 }
 
 func (e *Engine) onAttack(evt bus.Event) {
-	e.logger.Infow("attack detected", "payload", string(evt.Payload))
+	e.logger.Warnw("attack event received", "details", string(evt.Payload))
+	// 解析攻击事件，更新工具检测统计
+	var evtData map[string]interface{}
+	if err := json.Unmarshal(evt.Payload, &evtData); err == nil {
+		remoteIP, _ := evtData["remote_ip"].(string)
+		ua, _ := evtData["user_agent"].(string)
+		tool := e.collector.DetectTool(&fingerprint.AttackerFingerprint{UserAgent: ua})
+		e.logger.Warnw("attacker tool identified",
+			"remote_ip", remoteIP,
+			"tool", tool,
+			"user_agent", ua,
+		)
+	}
 }
 
 func (e *Engine) onBreadcrumbTrigger(evt bus.Event) {
 	e.logger.Warnw("BREADCRUMB TRIGGERED — attacker confirmed", "details", string(evt.Payload))
+	// 解析事件，记录确认的攻击者用于后续追踪升级
+	var evtData map[string]interface{}
+	if err := json.Unmarshal(evt.Payload, &evtData); err == nil {
+		remoteIP, _ := evtData["remote_ip"].(string)
+		path, _ := evtData["path"].(string)
+		ua, _ := evtData["user_agent"].(string)
+		tool := e.collector.DetectTool(&fingerprint.AttackerFingerprint{UserAgent: ua})
+		e.logger.Warnw("breadcrumb attacker confirmed",
+			"remote_ip", remoteIP,
+			"path", path,
+			"tool", tool,
+		)
+	}
 }
 
 // GetVulnDB 暴露漏洞库
@@ -101,12 +128,15 @@ func (e *Engine) GetPayloadGen() *payload.Generator { return e.payloadGen }
 // 选择策略（按优先级）：
 //  1. UA 识别 Chrome → Chrome 硬件指纹 + 社工下载诱饵
 //  2. UA 识别 Firefox → Firefox buildID/oscpu 指纹
-//  3. UA 识别 curl/wget/python → API 蜜标诱饵
-//  4. UA 识别 Burp/Java → 增强指纹 + 内网 IP 采集
-//  5. 路径含 admin/config → 管理后台蜜标表单
-//  6. 路径含 api/swagger → 假 API Key + 内网端点
-//  7. 路径含 .git/backup → 源码泄露蜜标
-//  8. 默认 → 增强通用指纹采集
+//  3. 路径含 actuator → Spring Boot Actuator 蜜标
+//  4. 路径含 swagger/api-docs → Swagger 文档未授权访问蜜标
+//  5. 路径含 admin/config/login → 管理后台蜜标表单
+//  6. UA 识别 curl/wget/python → API 蜜标诱饵
+//  7. UA 识别 Burp/Java → 增强内网 IP 采集
+//  8. 路径含 api → 假 API Key + 内网端点
+//  9. 路径含 .git/backup → 源码泄露蜜标
+//
+// 10. 默认 → 增强通用指纹采集
 func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 	ua := strings.ToLower(userAgent)
 
@@ -120,32 +150,42 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 		return e.firefoxPayload()
 	}
 
-	// 3. 自动化工具 (curl/wget/python) → API 蜜标诱饵
-	if strings.Contains(ua, "curl") || strings.Contains(ua, "wget") || strings.Contains(ua, "python") {
-		return e.apiHoneytokenPayload(path)
+	// 3. 路径匹配 — Spring Boot Actuator（优先于工具检测）
+	if strings.Contains(path, "actuator") {
+		return e.springbootHoneytokenPayload()
 	}
 
-	// 4. Burp Suite / Java → 增强内网 IP 采集
-	if strings.Contains(ua, "burp") || strings.Contains(ua, "java") {
-		return e.enhancedFingerprintPayload()
+	// 4. 路径匹配 — Swagger（优先于工具检测）
+	if strings.Contains(path, "swagger") || strings.Contains(path, "api-docs") {
+		return e.swaggerHoneytokenPayload()
 	}
 
-	// 5. 路径匹配 — 管理后台
+	// 5. 路径匹配 — 管理后台（优先于工具检测）
 	if strings.Contains(path, "admin") || strings.Contains(path, "config") || strings.Contains(path, "login") {
 		return e.adminHoneytokenPayload()
 	}
 
-	// 6. 路径匹配 — API/Swagger
-	if strings.Contains(path, "api") || strings.Contains(path, "swagger") {
+	// 6. 自动化工具 (curl/wget/python) → API 蜜标诱饵
+	if strings.Contains(ua, "curl") || strings.Contains(ua, "wget") || strings.Contains(ua, "python") {
 		return e.apiHoneytokenPayload(path)
 	}
 
-	// 7. 路径匹配 — 源码泄露
+	// 7. Burp Suite / Java → 增强内网 IP 采集
+	if strings.Contains(ua, "burp") || strings.Contains(ua, "java") {
+		return e.enhancedFingerprintPayload()
+	}
+
+	// 8. 路径匹配 — 通用 API
+	if strings.Contains(path, "api") {
+		return e.apiHoneytokenPayload(path)
+	}
+
+	// 9. 路径匹配 — 源码泄露
 	if strings.Contains(path, ".git") || strings.Contains(path, "backup") {
 		return e.sourceLeakHoneytoken()
 	}
 
-	// 8. 默认 — 增强通用指纹
+	// 10. 默认 — 增强通用指纹
 	return e.enhancedFingerprintPayload()
 }
 
@@ -212,6 +252,57 @@ document.write('<input type="hidden" name="session_id" value="hp_sess_k1l2m3n4o5
 document.write('<input type="hidden" name="api_secret" value="hp_sec_u1v2w3x4y5z6a7b8c9d0" />');
 document.write('</div>');
 (function(){var d={t:'admin_honeytoken',ts:Date.now(),ua:navigator.userAgent};
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})();
+</script>`)
+}
+
+// springbootHoneytokenPayload Spring Boot Actuator 未授权访问蜜标 — 泄露假装Spring配置
+func (e *Engine) springbootHoneytokenPayload() string {
+	return fmt.Sprintf(`<script>
+document.write('<div style="display:none" id="hp_springboot">');
+document.write('  <pre># Spring Boot Application Properties\n');
+document.write('spring.datasource.url=jdbc:mysql://10.0.1.50:3306/prod_db?useSSL=false&amp;serverTimezone=UTC\n');
+document.write('spring.datasource.username=root\n');
+document.write('spring.datasource.password=SpringBoot@Prod2024!\n');
+document.write('spring.datasource.hikari.maximum-pool-size=50\n');
+document.write('spring.redis.host=10.0.1.60\n');
+document.write('spring.redis.port=6379\n');
+document.write('spring.redis.password=Redis@Internal2024\n');
+document.write('spring.redis.database=0\n\n');
+document.write('# JWT\n');
+document.write('jwt.secret=prod-jwt-secret-key-2024-hp\n');
+document.write('jwt.expiration=86400000\n\n');
+document.write('# AWS Credentials\n');
+document.write('cloud.aws.credentials.accessKey=AKIAIOSFODNN7EXAMPLE\n');
+document.write('cloud.aws.credentials.secretKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n');
+document.write('cloud.aws.region=us-east-1\n\n');
+document.write('# Actuator (未授权访问漏洞)\n');
+document.write('management.endpoints.web.exposure.include=*\n');
+document.write('management.endpoint.health.show-details=always\n');
+document.write('management.endpoint.env.show-values=always\n');
+document.write('server.error.include-stacktrace=always\n</pre>');
+document.write('</div>');
+(function(){var d={t:'springboot_honeytoken',ts:Date.now(),ua:navigator.userAgent};
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})();
+</script>`)
+}
+
+// swaggerHoneytokenPayload Swagger 未授权访问蜜标 — 泄露 API 认证凭据
+func (e *Engine) swaggerHoneytokenPayload() string {
+	return fmt.Sprintf(`<script>
+document.write('<div style="display:none" id="hp_swagger">');
+document.write('  <pre>{\n  "swagger": "2.0",\n  "info": {\n    "title": "Internal Microservice API",\n    "version": "2.1.0",\n    "x-api-key": "swagger-internal-key-a1b2c3d4e5f6",\n    "x-auth-token": "Bearer eyJhbGciOiJIUzI1NiJ9.e30.hp_swagger_token"\n  },\n');
+document.write('  "host": "10.0.1.100:8080",\n  "basePath": "/",\n');
+document.write('  "securityDefinitions": {\n');
+document.write('    "X-API-Key": {"type": "apiKey","name": "X-API-Key","in": "header","defaultValue": "hp-api-key-2024"},\n');
+document.write('    "Bearer": {"type": "apiKey","name": "Authorization","in": "header","defaultValue": "Bearer hp-jwt-token-2024"}\n');
+document.write('  },\n  "x-internal-endpoints": [\n');
+document.write('    "http://10.0.1.50:8080/api/internal/users",\n');
+document.write('    "http://10.0.1.50:8080/api/internal/data/export",\n');
+document.write('    "http://10.0.1.60:6379"\n');
+document.write('  ]\n}</pre>');
+document.write('</div>');
+(function(){var d={t:'swagger_honeytoken',ts:Date.now(),ua:navigator.userAgent};
 new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})();
 </script>`)
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -265,6 +266,11 @@ var rl = newRateLimiter()
 
 func rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// /api/collect 端点豁免速率限制 — JS Payload 的 img beacon 回传不可丢失
+		if strings.HasPrefix(r.URL.Path, "/api/collect") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		ip := r.RemoteAddr
 		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
 			ip = fwd

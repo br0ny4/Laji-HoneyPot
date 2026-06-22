@@ -130,6 +130,8 @@ func (e *Engine) udpLoop(pc net.PacketConn, handler func(net.Conn), port int) {
 
 		host, _, _ := net.SplitHostPort(addr.String())
 		e.store.RecordConnection(host, port, "DNS", "")
+		evtData, _ := json.Marshal(map[string]interface{}{"remote_ip": host, "port": port, "service": "DNS"})
+		e.bus.Publish("honeypot.connection", evtData)
 
 		fakeConn := &udpConn{pc: pc, addr: addr, buf: buf[:n], n: n}
 

@@ -155,7 +155,7 @@ func (s *Store) GetStats() (*Stats, error) {
 
 	s.db.QueryRow("SELECT COUNT(DISTINCT service) FROM connections").Scan(&stats.ActiveServices)
 	if stats.ActiveServices == 0 {
-		stats.ActiveServices = 7 // HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS
+		stats.ActiveServices = 9 // HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP
 	}
 
 	today := time.Now().Format("2006-01-02")

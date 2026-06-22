@@ -67,6 +67,12 @@ func main() {
 
 	// API 服务器（含 SSE），支持优雅关闭
 	wsHub := api.NewWSHub(logger, st)
+
+	// 实时推送：连接/攻击/面包屑事件触发 SSE 广播
+	eventBus.Subscribe("honeypot.connection", func(evt bus.Event) { wsHub.BroadcastStats() })
+	eventBus.Subscribe("honeypot.attack", func(evt bus.Event) { wsHub.BroadcastStats() })
+	eventBus.Subscribe("honeypot.breadcrumb", func(evt bus.Event) { wsHub.BroadcastStats() })
+
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub)
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
