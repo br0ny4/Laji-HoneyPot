@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Graph, type GraphOptions } from '@antv/g6';
+import { apiFetch } from '../api';
 
 interface TopoNode {
   id: string;
@@ -55,7 +56,7 @@ export default function TopologyGraph() {
 
   const fetchTopology = useCallback(async () => {
     try {
-      const res = await fetch('/api/topology');
+      const res = await apiFetch('/api/topology');
       const data: TopologyData = await res.json();
       setTopoData(data);
     } catch {

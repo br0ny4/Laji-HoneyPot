@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../api';
 
 interface Fingerprint {
   id: number;
@@ -15,7 +16,7 @@ export default function FingerprintPanel() {
   const [selected, setSelected] = useState<Fingerprint | null>(null);
 
   const fetchFps = () => {
-    fetch(`/api/fingerprints?limit=${limit}`)
+    apiFetch(`/api/fingerprints?limit=${limit}`)
       .then((r) => r.json())
       .then((d) => setFps(d.fingerprints || []))
       .catch(() => {});

@@ -81,7 +81,7 @@ func main() {
 	eventBus.Subscribe("honeypot.attack", func(evt bus.Event) { wsHub.BroadcastStats() })
 	eventBus.Subscribe("honeypot.breadcrumb", func(evt bus.Event) { wsHub.BroadcastStats() })
 
-	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub)
+	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, cfg.APIKey)
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
 		Handler: apiSrv.Handler(),

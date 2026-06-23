@@ -23,16 +23,18 @@ type Server struct {
 	vulnDB *vulndb.DB
 	wsHub  *WSHub
 	mux    *http.ServeMux
+	apiKey string // 管理后台认证密钥，空则不启用
 }
 
 // NewServer 创建 API 服务器
-func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub) *Server {
+func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, apiKey string) *Server {
 	s := &Server{
 		logger: logger,
 		store:  st,
 		vulnDB: vdb,
 		wsHub:  hub,
 		mux:    http.NewServeMux(),
+		apiKey: apiKey,
 	}
 	s.registerRoutes()
 	return s
@@ -62,16 +64,32 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/collect", s.handleCollect)
 }
 
-// Handler 返回带 CORS + 速率限制的 http.Handler
+// Handler 返回带安全中间件链的 http.Handler
+// 链式顺序: CORS白名单 → API Key认证 → 速率限制
 func (s *Server) Handler() http.Handler {
-	return corsMiddleware(rateLimitMiddleware(s.mux))
+	return corsMiddleware(s.apiKeyMiddleware(rateLimitMiddleware(s.mux)))
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		// 仅允许本地开发和生产 localhost 来源
+		allowedOrigins := map[string]bool{
+			"http://localhost:3000": true,
+			"http://127.0.0.1:3000": true,
+			"http://localhost:8080": true,
+			"http://127.0.0.1:8080": true,
+		}
+		if allowedOrigins[origin] || origin == "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			if origin == "" {
+				// 同源请求（如直接访问 API），允许
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+		w.Header().Set("Access-Control-Expose-Headers", "X-API-Key")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -79,6 +97,57 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// apiKeyMiddleware API Key 认证中间件
+// 仅当配置了 api_key 时才启用。以下端点豁免认证：
+//   - /healthz        （健康检查，无需认证）
+//   - /api/collect     （浏览器指纹采集，由攻击者浏览器触发，不可拦截）
+//   - /api/events       （SSE 实时推送，前端 EventSource 不支持自定义 Header）
+func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 未配置 API Key → 跳过认证
+		if s.apiKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		path := r.URL.Path
+
+		// 豁免端点：健康检查、指纹采集、SSE 推送
+		if path == "/healthz" || strings.HasPrefix(path, "/api/collect") || path == "/api/events" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 校验 X-API-Key 请求头
+		key := r.Header.Get("X-API-Key")
+		// 也支持 ?api_key=xxx 查询参数（SSE 场景下前端无法设置 Header）
+		if key == "" {
+			key = r.URL.Query().Get("api_key")
+		}
+		if key != s.apiKey {
+			s.logger.Warnw("api auth failed",
+				"remote", r.RemoteAddr,
+				"path", path,
+				"provided_key", maskKey(key),
+			)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"error":"unauthorized","message":"valid X-API-Key required"}`)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// maskKey 脱敏显示 Key（仅用于日志）
+func maskKey(key string) string {
+	if len(key) <= 4 {
+		return "***"
+	}
+	return key[:4] + strings.Repeat("*", len(key)-4)
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

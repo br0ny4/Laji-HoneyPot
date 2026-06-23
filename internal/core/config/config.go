@@ -13,6 +13,7 @@ type Config struct {
 	Plugins  map[string]Section `yaml:"plugins"`
 	APIAddr  string             `yaml:"api_addr"`
 	DataDir  string             `yaml:"data_dir"`
+	APIKey   string             `yaml:"api_key"`
 }
 
 // Section 插件级配置，支持任意键值对
@@ -58,6 +59,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("HP_DATA_DIR"); v != "" {
 		cfg.DataDir = v
+	}
+	if v := os.Getenv("HP_API_KEY"); v != "" {
+		cfg.APIKey = v
 	}
 }
 

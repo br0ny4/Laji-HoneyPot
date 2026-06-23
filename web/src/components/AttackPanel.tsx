@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../api';
 
 interface AttackEvent {
   id: number;
@@ -15,7 +16,7 @@ export default function AttackPanel() {
   const [selected, setSelected] = useState<AttackEvent | null>(null);
 
   const fetchAttacks = () => {
-    fetch(`/api/attacks?limit=${limit}`)
+    apiFetch(`/api/attacks?limit=${limit}`)
       .then((r) => r.json())
       .then((d) => setAttacks(d.attacks || []))
       .catch(() => {});

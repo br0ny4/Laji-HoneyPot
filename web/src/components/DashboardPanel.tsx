@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../api';
 
 interface Stats {
   active_services: number;
@@ -25,29 +26,29 @@ export default function DashboardPanel() {
   const [conns, setConns] = useState<Connection[]>([]);
 
   useEffect(() => {
-    fetch('/api/stats/detailed')
+    apiFetch('/api/stats/detailed')
       .then((r) => r.json())
       .then(setStats)
       .catch(() => {});
 
-    fetch('/api/connections?limit=10')
+    apiFetch('/api/connections?limit=10')
       .then((r) => r.json())
       .then((d) => setConns(d.connections || []))
       .catch(() => {});
   }, []);
 
-  // SSE 实时更新
+  // SSE 实时更新（/api/events 已豁免认证，无需 api_key）
   useEffect(() => {
     const es = new EventSource('/api/events');
     es.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'stats') {
-          fetch('/api/stats/detailed')
+          apiFetch('/api/stats/detailed')
             .then((r) => r.json())
             .then(setStats)
             .catch(() => {});
-          fetch('/api/connections?limit=10')
+          apiFetch('/api/connections?limit=10')
             .then((r) => r.json())
             .then((d) => setConns(d.connections || []))
             .catch(() => {});
