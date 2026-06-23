@@ -202,6 +202,8 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
 	e.logger.Warnw("BREADCRUMB TRIGGERED", "remote", remoteIP, "path", path, "ua", userAgent)
 	e.store.RecordAttack(remoteIP, path, userAgent, "breadcrumb_trigger")
+	// 标记该IP上次反制措施为有效（攻击者再次触发面包屑说明反制奏效）
+	e.store.MarkCountermeasureEffective(remoteIP)
 	evtData, err := json.Marshal(map[string]interface{}{
 		"remote_ip": remoteIP, "path": path, "user_agent": userAgent,
 	})

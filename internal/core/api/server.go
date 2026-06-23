@@ -56,6 +56,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/fingerprints", s.handleFingerprints)
 	// 系统状态
 	s.mux.HandleFunc("/api/system", s.handleSystem)
+	// 反制事件
+	s.mux.HandleFunc("/api/countermeasures", s.handleCountermeasures)
+	s.mux.HandleFunc("/api/countermeasures/stats", s.handleCountermeasureStats)
 	// 漏洞数据库
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
 	// 健康检查
@@ -261,6 +264,30 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		info["attackers_today"] = stats.Attackers
 	}
 	writeJSON(w, http.StatusOK, info)
+}
+
+func (s *Server) handleCountermeasures(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 50)
+	cms, err := s.store.GetCountermeasures(limit)
+	if err != nil {
+		s.logger.Errorw("countermeasures query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":           len(cms),
+		"countermeasures": cms,
+	})
+}
+
+func (s *Server) handleCountermeasureStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.store.GetCountermeasureStats()
+	if err != nil {
+		s.logger.Errorw("countermeasure stats query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

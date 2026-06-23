@@ -33,8 +33,8 @@ func TestSelectPayloadFirefox(t *testing.T) {
 func TestSelectPayloadCurl(t *testing.T) {
 	e := newTestEngine()
 	payload := e.SelectPayload("/api/test", "curl/7.88.1", "10.0.0.1")
-	if !strings.Contains(payload, "api_honeytoken") {
-		t.Error("expected api honeytoken payload for curl UA")
+	if !strings.Contains(payload, "dns_rebinding") {
+		t.Error("expected dns_rebinding payload for curl UA")
 	}
 }
 
@@ -64,7 +64,7 @@ func TestSelectPayloadApiDocs(t *testing.T) {
 
 func TestSelectPayloadDefault(t *testing.T) {
 	e := newTestEngine()
-	payload := e.SelectPayload("/", "UnknownBot/1.0", "10.0.0.1")
+	payload := e.SelectPayload("/", "UnknownScanner/1.0", "10.0.0.1")
 	if !strings.Contains(payload, "enhanced") {
 		t.Error("expected enhanced fingerprint payload for unknown UA")
 	}
@@ -145,14 +145,17 @@ func TestSwaggerPathPriorityOverApi(t *testing.T) {
 func TestAllPayloadsNonEmpty(t *testing.T) {
 	e := newTestEngine()
 	payloads := map[string]string{
-		"chrome":     e.chromePayload(),
-		"firefox":    e.firefoxPayload(),
-		"api":        e.apiHoneytokenPayload("/test"),
-		"admin":      e.adminHoneytokenPayload(),
-		"springboot": e.springbootHoneytokenPayload(),
-		"swagger":    e.swaggerHoneytokenPayload(),
-		"sourceLeak": e.sourceLeakHoneytoken(),
-		"enhanced":   e.enhancedFingerprintPayload(),
+		"chrome":       e.chromePayload(),
+		"firefox":      e.firefoxPayload(),
+		"api":          e.apiHoneytokenPayload("/test"),
+		"admin":        e.adminHoneytokenPayload(),
+		"springboot":   e.springbootHoneytokenPayload(),
+		"swagger":      e.swaggerHoneytokenPayload(),
+		"sourceLeak":   e.sourceLeakHoneytoken(),
+		"enhanced":     e.enhancedFingerprintPayload(),
+		"dnsRebinding": e.dnsRebindingPayload("/test"),
+		"webrtcScan":   e.webrtcInternalScanPayload(),
+		"vpnBait":      e.vpnBaitPayload(),
 	}
 	for name, p := range payloads {
 		if len(p) == 0 {

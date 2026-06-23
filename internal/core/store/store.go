@@ -106,6 +106,20 @@ func (s *Store) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_fp_tracking ON fingerprints(tracking_id);
+
+	CREATE TABLE IF NOT EXISTS countermeasure_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		remote_ip TEXT NOT NULL,
+		trigger_path TEXT DEFAULT '',
+		payload_type TEXT DEFAULT 'unknown',
+		payload_preview TEXT DEFAULT '',
+		user_agent TEXT DEFAULT '',
+		effective INTEGER DEFAULT 0,
+		related_attack_id INTEGER DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_cm_ip ON countermeasure_events(remote_ip);
+	CREATE INDEX IF NOT EXISTS idx_cm_ts ON countermeasure_events(timestamp);
 	`
 	_, err := s.db.Exec(ddl)
 	return err
@@ -561,6 +575,104 @@ func (s *Store) GetAttackers(limit int) ([]AttackerSummary, error) {
 		results = append(results, a)
 	}
 	return results, rows.Err()
+}
+
+// CountermeasureEvent 反制事件 — 记录每次对攻击者部署的反制手段
+type CountermeasureEvent struct {
+	ID              int64  `json:"id"`
+	Timestamp       string `json:"timestamp"`
+	RemoteIP        string `json:"remote_ip"`
+	TriggerPath     string `json:"trigger_path"`    // 触发反制的面包屑路径
+	PayloadType     string `json:"payload_type"`    // 反制载荷类型
+	PayloadPreview  string `json:"payload_preview"` // 载荷摘要(前200字符)
+	UserAgent       string `json:"user_agent"`
+	Effective       bool   `json:"effective"` // 是否有效(攻击者后续是否再次触发面包屑)
+	RelatedAttackID int64  `json:"related_attack_id"`
+}
+
+// CountermeasureStats 反制统计
+type CountermeasureStats struct {
+	TotalDeployed  int            `json:"total_deployed"`
+	TotalEffective int            `json:"total_effective"`
+	ByType         map[string]int `json:"by_type"`
+	EffectRate     float64        `json:"effect_rate"`
+}
+
+// RecordCountermeasure 记录一次反制部署
+func (s *Store) RecordCountermeasure(remoteIP, triggerPath, payloadType, payloadPreview, userAgent string, relatedAttackID int64) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO countermeasure_events (remote_ip, trigger_path, payload_type, payload_preview, user_agent, related_attack_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		remoteIP, triggerPath, payloadType, payloadPreview, userAgent, relatedAttackID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetCountermeasures 获取反制事件列表
+func (s *Store) GetCountermeasures(limit int) ([]CountermeasureEvent, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		`SELECT id, timestamp, remote_ip, trigger_path, payload_type, payload_preview, user_agent, effective, related_attack_id
+		 FROM countermeasure_events ORDER BY timestamp DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []CountermeasureEvent
+	for rows.Next() {
+		var e CountermeasureEvent
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.RemoteIP, &e.TriggerPath,
+			&e.PayloadType, &e.PayloadPreview, &e.UserAgent, &e.Effective, &e.RelatedAttackID); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// GetCountermeasureStats 获取反制统计
+func (s *Store) GetCountermeasureStats() (*CountermeasureStats, error) {
+	cs := &CountermeasureStats{ByType: make(map[string]int)}
+
+	s.db.QueryRow("SELECT COUNT(*) FROM countermeasure_events").Scan(&cs.TotalDeployed)
+	s.db.QueryRow("SELECT COUNT(*) FROM countermeasure_events WHERE effective = 1").Scan(&cs.TotalEffective)
+
+	if cs.TotalDeployed > 0 {
+		cs.EffectRate = float64(cs.TotalEffective) / float64(cs.TotalDeployed) * 100
+	}
+
+	rows, err := s.db.Query("SELECT payload_type, COUNT(*) as cnt FROM countermeasure_events GROUP BY payload_type ORDER BY cnt DESC")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var pt string
+			var cnt int
+			if rows.Scan(&pt, &cnt) == nil {
+				cs.ByType[pt] = cnt
+			}
+		}
+	}
+
+	return cs, nil
+}
+
+// MarkCountermeasureEffective 标记反制措施为有效（攻击者后续触发面包屑）
+func (s *Store) MarkCountermeasureEffective(remoteIP string) error {
+	_, err := s.db.Exec(
+		`UPDATE countermeasure_events SET effective = 1
+		 WHERE remote_ip = ? AND effective = 0
+		 ORDER BY timestamp DESC LIMIT 1`,
+		remoteIP,
+	)
+	return err
 }
 
 // Close 关闭数据库连接

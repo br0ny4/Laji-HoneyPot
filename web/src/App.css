@@ -482,3 +482,79 @@ body {
   color: #38bdf8;
   border: 1px solid #334155;
 }
+
+/* ========== Countermeasure Panel ========== */
+.cm-stats-bar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px;
+  margin: 16px 0;
+  background: #1e293b;
+  border-radius: 8px;
+  border: 1px solid #334155;
+}
+.cm-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  border-right: 1px solid #334155;
+}
+.cm-stat-item:last-child { border-right: none; }
+.cm-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.cm-stat-value.cm-effective { color: #86efac; }
+.cm-stat-value.cm-rate { color: #38bdf8; }
+.cm-stat-label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+.cm-stat-mini .cm-stat-value {
+  font-size: 16px;
+}
+
+.cm-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cm-type-danger { background: #450a0a; color: #fca5a5; }
+.cm-type-bait { background: #172554; color: #93c5fd; }
+.cm-type-fingerprint { background: #1e293b; color: #94a3b8; }
+.cm-type-default { background: #27272a; color: #a1a1aa; }
+
+.cm-effective-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #052e16;
+  color: #86efac;
+}
+.cm-pending-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #27272a;
+  color: #a1a1aa;
+}
+
+.status-idle {
+  background: #27272a;
+  color: #a1a1aa;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}

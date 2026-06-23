@@ -223,6 +223,15 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 		if idx := strings.LastIndex(body, "</body>"); idx > 0 {
 			body = body[:idx] + counterJS + body[idx:]
 		}
+		// 记录反制事件到持久化存储
+		if s.store != nil && len(counterJS) > 0 {
+			payloadType := detectPayloadType(counterJS)
+			preview := counterJS
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			s.store.RecordCountermeasure(host, path, payloadType, preview, ua, 0)
+		}
 	}
 
 	bodyBytes := []byte(body)
@@ -780,4 +789,34 @@ func (s *Server) defaultJSPPage() string {
 // 采集：Canvas、WebGL、屏幕、时区、语言、插件、WebRTC IP、Navigator 属性、AudioContext、电池、网络、无头检测
 func buildFingerprintJS() string {
 	return `(function(){var d={};try{var c=document.createElement('canvas');c.width=280;c.height=60;var x=c.getContext('2d');x.fillStyle='#f60';x.fillRect(125,1,62,20);x.fillStyle='#069';x.fillText('Trace',2,15);d.canvas=c.toDataURL().substring(0,120)}catch(e){d.canvas='err'}try{var g=document.createElement('canvas').getContext('webgl');if(g){d.gpu=g.getParameter(g.RENDERER)}}catch(e){}d.scr=screen.width+'x'+screen.height;d.avail=screen.availWidth+'x'+screen.availHeight;d.cd=screen.colorDepth;d.pd=screen.pixelDepth;d.tz=Intl.DateTimeFormat().resolvedOptions().timeZone;d.lang=navigator.language;d.plat=navigator.platform;d.ps=navigator.productSub;d.ven=navigator.vendor;d.vs=navigator.vendorSub;d.hc=navigator.hardwareConcurrency;try{d.dm=navigator.deviceMemory}catch(e){}try{var p=[];for(var i=0;i<navigator.plugins.length;i++)p.push(navigator.plugins[i].name);d.plugins=p;d.plugLen=navigator.plugins.length}catch(e){}try{var ac=new(window.AudioContext||window.webkitAudioContext)(),osc=ac.createOscillator(),an=ac.createAnalyser();osc.connect(an);an.connect(ac.destination);osc.start(0);var buf=new Float32Array(an.frequencyBinCount);an.getFloatTimeDomainData(buf);d.afp=Array.prototype.slice.call(buf,0,10).join(',')}catch(e){}try{navigator.getBattery().then(function(b){d.bat=Math.round(b.level*100)+':'+b.charging})}catch(e){}try{d.conn=navigator.connection.effectiveType}catch(e){}try{var el=document.createElement('div');document.body.appendChild(el);d.crW=el.getClientRects().length===0?1:0;d.ow=window.outerWidth===0?1:0;document.body.removeChild(el)}catch(e){d.crW=0;d.ow=0}try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};setTimeout(function(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))},2000)}catch(e){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}})();`
+}
+
+// detectPayloadType 从反制 JS 中识别载荷类型
+func detectPayloadType(js string) string {
+	switch {
+	case strings.Contains(js, "t:'chrome_exploit'"):
+		return "chrome_exploit"
+	case strings.Contains(js, "t:'firefox'"):
+		return "firefox"
+	case strings.Contains(js, "t:'api_honeytoken'"):
+		return "api_honeytoken"
+	case strings.Contains(js, "t:'admin_honeytoken'"):
+		return "admin_honeytoken"
+	case strings.Contains(js, "t:'springboot_honeytoken'"):
+		return "springboot_honeytoken"
+	case strings.Contains(js, "t:'swagger_honeytoken'"):
+		return "swagger_honeytoken"
+	case strings.Contains(js, "t:'source_honeytoken'"):
+		return "source_honeytoken"
+	case strings.Contains(js, "t:'enhanced'"):
+		return "enhanced_fingerprint"
+	case strings.Contains(js, "t:'dns_rebinding'"):
+		return "dns_rebinding"
+	case strings.Contains(js, "t:'webrtc_scan'"):
+		return "webrtc_internal_scan"
+	case strings.Contains(js, "t:'vpn_bait'"):
+		return "vpn_bait"
+	default:
+		return "unknown"
+	}
 }
