@@ -73,10 +73,21 @@ func (e *Engine) Init(cfg config.Section) error {
 
 	httpSrv := httpSvc.New(e.logger, e.store)
 	e.httpSrv = httpSrv
+
+	// 加载自定义 HTTP 响应模板（YAML 配置驱动，无需改代码即可添加蜜罐页面）
+	if tmpls := parseCustomTemplates(cfg); len(tmpls) > 0 {
+		httpSrv.SetCustomTemplates(tmpls)
+		e.logger.Infow("custom http templates loaded", "count", len(tmpls))
+	}
+
 	mysqlSrv := mysqlSvc.New(e.logger)
+	mysqlSrv.SetBus(e.bus)
 	redisSrv := redisSvc.New(e.logger)
+	redisSrv.SetBus(e.bus)
 	sshSrv := sshSvc.New(e.logger)
+	sshSrv.SetBus(e.bus)
 	ftpSrv := ftpSvc.New(e.logger)
+	ftpSrv.SetBus(e.bus)
 	ldapSrv := ldapSvc.New(e.logger)
 	smbSrv := smbSvc.New(e.logger)
 	rdpSrv := rdpSvc.New(e.logger)
@@ -317,10 +328,10 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 			e.bus.Publish("honeypot.connection", evtData)
 		}
 
-		// 协议指纹数据采集
-		e.collectProtocolFingerprint(service, conn, host, tlsData)
-
 		handler(wrappedConn)
+
+		// TLS 指纹数据采集（在 handler 执行后发布，确保协议数据已由服务侧发布）
+		e.collectProtocolFingerprint(service, host, tlsData)
 	}
 }
 
@@ -439,9 +450,11 @@ func parseTLSClientHello(hello []byte) (string, []uint16) {
 	return sni, cipherSuites
 }
 
-// collectProtocolFingerprint 采集协议指纹数据并通过事件总线发布
-func (e *Engine) collectProtocolFingerprint(service string, conn net.Conn, host string, tlsData string) {
-	// 通过事件总线发布指纹事件，溯源引擎负责消费和持久化
+// collectProtocolFingerprint 采集 TLS 指纹基线数据并通过事件总线发布
+func (e *Engine) collectProtocolFingerprint(service, host, tlsData string) {
+	if tlsData == "" {
+		return
+	}
 	evtData, _ := json.Marshal(map[string]interface{}{
 		"remote_ip": host,
 		"service":   service,
@@ -498,4 +511,49 @@ func (e *Engine) Stop() error {
 		e.udpListener.Close()
 	}
 	return nil
+}
+
+// parseCustomTemplates 从配置中解析自定义 HTTP 响应模板
+func parseCustomTemplates(cfg config.Section) []httpSvc.CustomTemplate {
+	raw, ok := cfg["custom_templates"]
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	templates := make([]httpSvc.CustomTemplate, 0, len(list))
+	for _, item := range list {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t := httpSvc.CustomTemplate{}
+		if v, ok := m["path"].(string); ok {
+			t.Path = v
+		}
+		if v, ok := m["status"].(int); ok {
+			t.Status = v
+		}
+		if v, ok := m["content_type"].(string); ok {
+			t.ContentType = v
+		}
+		if v, ok := m["body"].(string); ok {
+			t.Body = v
+		}
+		if v, ok := m["is_breadcrumb"].(bool); ok {
+			t.IsBreadcrumb = v
+		}
+		if t.Path != "" {
+			if t.Status == 0 {
+				t.Status = 200
+			}
+			if t.ContentType == "" {
+				t.ContentType = "text/html"
+			}
+			templates = append(templates, t)
+		}
+	}
+	return templates
 }

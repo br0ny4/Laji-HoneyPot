@@ -25,6 +25,16 @@ type Server struct {
 	fingerprintJS    string
 	countermeasureCB CountermeasureCallback // 面包屑触发时的额外反制 JS 回调
 	decoyPageCB      DecoyPageCallback      // 诱饵页面回调（JSP/CS 等完整页面）
+	customTemplates  []CustomTemplate       // YAML 自定义响应模板
+}
+
+// CustomTemplate 自定义 HTTP 响应模板
+type CustomTemplate struct {
+	Path         string `yaml:"path"`
+	Status       int    `yaml:"status"`
+	ContentType  string `yaml:"content_type"`
+	Body         string `yaml:"body"`
+	IsBreadcrumb bool   `yaml:"is_breadcrumb"`
 }
 
 // New 创建 HTTP 蜜罐，st 可选（传 nil 则跳过 UA 补录）
@@ -161,6 +171,27 @@ func (s *Server) SetDecoyPageCallback(fn DecoyPageCallback) {
 	s.decoyPageCB = fn
 }
 
+// SetCustomTemplates 设置 YAML 自定义响应模板
+func (s *Server) SetCustomTemplates(templates []CustomTemplate) {
+	s.customTemplates = templates
+	for _, t := range templates {
+		if t.IsBreadcrumb {
+			s.breadcrumbs = append(s.breadcrumbs, t.Path)
+		}
+	}
+}
+
+// matchCustomTemplate 匹配自定义模板，返回模板和是否匹配
+func (s *Server) matchCustomTemplate(path string) *CustomTemplate {
+	for i := range s.customTemplates {
+		t := &s.customTemplates[i]
+		if strings.HasPrefix(path, t.Path) {
+			return t
+		}
+	}
+	return nil
+}
+
 func (s *Server) isBreadcrumb(path string) bool {
 	for _, bc := range s.breadcrumbs {
 		if strings.HasPrefix(path, bc) {
@@ -176,6 +207,16 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 	contentType := "text/html; charset=utf-8"
 	body := s.renderPage(path)
 	isDirListing := false
+
+	// 自定义模板优先匹配（YAML 配置驱动）
+	if tmpl := s.matchCustomTemplate(path); tmpl != nil {
+		status = tmpl.Status
+		if tmpl.ContentType != "" {
+			contentType = tmpl.ContentType
+		}
+		body = tmpl.Body
+		goto buildHeaders
+	}
 
 	if strings.Contains(path, "admin") || strings.Contains(path, "login") {
 		body = s.loginPage()
@@ -217,6 +258,7 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 	}
 
 	// 面包屑触发的反制 JS 注入（在 Content-Length 计算前，确保 HTTP 兼容）
+buildHeaders:
 	if breadcrumbTriggered && s.countermeasureCB != nil && strings.HasPrefix(contentType, "text/html") {
 		host, _, _ := net.SplitHostPort(remote)
 		counterJS := s.countermeasureCB(path, ua, host)

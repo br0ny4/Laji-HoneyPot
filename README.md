@@ -187,6 +187,82 @@ docker compose up -d
 
 ---
 
+## 管理后台
+
+Laji-HoneyPot 提供 React 18 可视化后台管理系统，支持实时监控蜜罐状态、查看攻击事件与反制日志、拓扑图可视化等。
+
+### 启动前端
+
+```bash
+cd web
+
+# 安装依赖（仅首次）
+npm install
+
+# 开发模式启动（默认 http://localhost:3000）
+npm run dev
+
+# 生产构建（输出到 web/dist/）
+npm run build
+```
+
+### 访问后台
+
+| 项目 | 地址 |
+|------|------|
+| 管理后台 | `http://localhost:3000`（开发模式） |
+| API 接口 | `http://127.0.0.1:8080` |
+
+> **安全设计**: API 仅绑定 `127.0.0.1`，不对外暴露。前端通过 Vite 开发代理转发 API 请求，生产环境需配合反向代理（如 nginx）或静态文件嵌入。
+
+### API 认证
+
+管理后台 API 使用 `X-API-Key` Header 认证，默认密钥为 `hp-admin-2024`。可通过配置修改：
+
+```yaml
+# config.yaml
+api_key: "your-custom-key"
+```
+
+或环境变量：
+
+```bash
+export HP_API_KEY="your-custom-key"
+```
+
+> 以下端点无需认证（面向攻击者指纹回传）：`/healthz`、`/api/collect`、`/api/events`
+
+### 后台功能模块
+
+| 标签页 | 功能 | API 端点 |
+|--------|------|---------|
+| 仪表盘 | 实时统计（连接数/攻击者/反制数/服务状态） | `/api/stats` + SSE 推送 |
+| 拓扑图 | G6 力导向图（攻击路径=红色 / 反制路径=蓝色） | `/api/topology` |
+| 攻击事件 | 面包屑触发记录列表 | `/api/attacks` |
+| 溯源反制 | 浏览器指纹采集详情 | `/api/fingerprints` |
+| 反制日志 | 反制部署记录 + 效果追踪 + 载荷详情 | `/api/countermeasures` + `/api/countermeasures/stats` |
+| 资产台账 | 攻击者 IP 维度汇总（风险评级） | `/api/attackers` |
+| 端口扫描 | 端口扫描感知记录 | `/api/portscans` |
+| 运维管理 | 系统状态 + 部署指南 + 性能指标 | `/api/system` |
+
+### 运行时监控
+
+```bash
+# 系统运行时指标（内存/goroutine/GC/uptime）
+curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/metrics
+
+# 输出示例
+{
+  "uptime_seconds": 3600,
+  "goroutines": 42,
+  "memory": { "alloc_mb": 12.5, "sys_mb": 28.3, "num_gc": 15 },
+  "go_version": "go1.23.0",
+  "num_cpu": 8
+}
+```
+
+---
+
 ## 项目架构
 
 ```
@@ -259,10 +335,12 @@ Laji-HoneyPot/
 - [x] DNS重绑定 + WebRTC内网扫描 + VPN诱饵（v0.6）
 - [x] 配置enabled生效 + TLS被动检测 + 竞品自动研究（v0.7）
 - [x] /api/metrics 运行时监控（v0.7）
-- [ ] 多告警通道（Webhook / 钉钉 / 飞书 / 邮件）
-- [ ] 全端口扫描感知（TCP/UDP/ICMP）
+- [x] 多告警通道 — Webhook/钉钉/飞书（v0.8）
+- [x] 全端口扫描感知 — 连接频率检测（v0.8）
+- [x] 自定义 HTTP 蜜罐模板 — YAML 驱动无代码扩展（v0.9）
+- [x] 协议指纹管线 — SSH/MySQL/FTP/Redis 数据入 AttackerFingerprint（v0.9）
+- [x] 告警模块单元测试 + 容器管理模块单元测试（v0.9）
 - [ ] 分布式集群架构（管理端 + 远程蜜罐节点）
-- [ ] 自定义蜜罐模板化配置
 - [ ] 反制能力增强（截屏、文件读取 PoC）
 - [ ] 智能载荷选择扩展到iOS/Android指纹
 
@@ -278,8 +356,8 @@ Laji-HoneyPot/
 | **反制深度** | **DNS重绑定/WebRTC扫描/VPN诱饵/Heapdump** | 未涉及 |
 | **拓扑可视化** | **G6双向攻击/反制路径图** | 基础展示 |
 | **面包屑机制** | **20个隐藏路径+自动注入** | 蜜饵配置 |
-| 全端口扫描 | — | **TCP/UDP/ICMP感知** |
-| 告警通道 | — | **邮件/Syslog/钉钉/飞书/企微** |
+| 全端口扫描 | **连接频率检测(5端口/60s)** | TCP/UDP/ICMP感知 |
+| 告警通道 | **Webhook/钉钉/飞书** | 邮件/Syslog/钉钉/飞书/企微 |
 | 跨平台 | Linux/macOS | **Linux/Win/ARM/国产OS+CPU** |
 | 云端蜜网 | — | **加密流量牵引** |
 | 漏洞库 | NVD定期更新+红队工具 | 内置情报库+TI集成 |

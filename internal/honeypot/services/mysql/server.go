@@ -2,18 +2,21 @@ package mysql
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
 // Server MySQL 蜜罐服务
 type Server struct {
 	logger *log.Logger
+	bus    *bus.Bus
 	connID atomic.Uint32
 }
 
@@ -21,6 +24,9 @@ type Server struct {
 func New(logger *log.Logger) *Server {
 	return &Server{logger: logger}
 }
+
+// SetBus 注入事件总线（由蜜罐引擎调用）
+func (s *Server) SetBus(b *bus.Bus) { s.bus = b }
 
 // Handle 处理 MySQL 连接
 func (s *Server) Handle(conn net.Conn) {
@@ -51,6 +57,9 @@ func (s *Server) Handle(conn net.Conn) {
 		"username", username,
 		"conn_id", id,
 	)
+
+	// 发布协议指纹事件
+	s.publishFingerprint(remote, username, "")
 
 	s.sendErr(conn, 1045, "Access denied for user '"+username+"'@'"+remote+"' (using password: YES)")
 
@@ -84,6 +93,7 @@ func (s *Server) Handle(conn net.Conn) {
 				"query", string(payload[1:]),
 				"conn_id", id,
 			)
+			s.publishFingerprint(remote, username, string(payload[1:]))
 			if s.handleFingerprintQuery(conn, seq, query) {
 				continue
 			}
@@ -308,6 +318,26 @@ func packPacket(payload []byte, seq int) []byte {
 	pkt[3] = byte(seq)
 	copy(pkt[4:], payload)
 	return pkt
+}
+
+// publishFingerprint 发布 MySQL 协议指纹事件
+func (s *Server) publishFingerprint(remote, username, query string) {
+	if s.bus == nil {
+		return
+	}
+	host, _, _ := net.SplitHostPort(remote)
+	data := map[string]interface{}{
+		"remote_ip":      host,
+		"service":        "MySQL",
+		"mysql_username": username,
+	}
+	if query != "" {
+		data["mysql_query"] = query
+	}
+	evt, _ := json.Marshal(data)
+	if evt != nil {
+		s.bus.Publish("honeypot.fingerprint", evt)
+	}
 }
 
 var _ fmt.Stringer = (*Server)(nil)

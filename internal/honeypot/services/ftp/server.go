@@ -2,23 +2,29 @@ package ftp
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
 // Server FTP 蜜罐服务（模拟 vsftpd 3.0.3）
 type Server struct {
 	logger *log.Logger
+	bus    *bus.Bus
 }
 
 // New 创建 FTP 蜜罐
 func New(logger *log.Logger) *Server {
 	return &Server{logger: logger}
 }
+
+// SetBus 注入事件总线（由蜜罐引擎调用）
+func (s *Server) SetBus(b *bus.Bus) { s.bus = b }
 
 // Handle 处理 FTP 连接
 func (s *Server) Handle(conn net.Conn) {
@@ -33,6 +39,8 @@ func (s *Server) Handle(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	buf := make([]byte, 4096)
 
+	var ftpUser string // 跟踪当前用户名用于指纹采集
+
 	for {
 		conn.SetDeadline(time.Now().Add(60 * time.Second))
 		n, err := reader.Read(buf)
@@ -45,6 +53,11 @@ func (s *Server) Handle(conn net.Conn) {
 
 		switch {
 		case strings.HasPrefix(cmd, "USER"):
+			parts := strings.Fields(string(buf[:n]))
+			if len(parts) > 1 {
+				ftpUser = parts[1]
+			}
+			s.publishFingerprint(remote, ftpUser, "")
 			s.reply(conn, "331 Please specify the password.")
 		case strings.HasPrefix(cmd, "PASS"):
 			// 收集登录凭据（诱饵）
@@ -54,6 +67,7 @@ func (s *Server) Handle(conn net.Conn) {
 				pass = parts[1]
 			}
 			s.logger.Infow("ftp login attempt", "remote", remote, "password", pass)
+			s.publishFingerprint(remote, ftpUser, pass)
 			s.reply(conn, "530 Login incorrect.")
 		case strings.HasPrefix(cmd, "QUIT"):
 			s.reply(conn, "221 Goodbye.")
@@ -94,5 +108,23 @@ func (s *Server) Handle(conn net.Conn) {
 func (s *Server) reply(conn net.Conn, msg string) {
 	if _, err := fmt.Fprintf(conn, "%s\r\n", msg); err != nil {
 		s.logger.Debugw("ftp write error", "error", err)
+	}
+}
+
+// publishFingerprint 发布 FTP 协议指纹事件
+func (s *Server) publishFingerprint(remote, username, password string) {
+	if s.bus == nil {
+		return
+	}
+	host, _, _ := net.SplitHostPort(remote)
+	data := map[string]interface{}{
+		"remote_ip":    host,
+		"service":      "FTP",
+		"ftp_username": username,
+		"ftp_password": password,
+	}
+	evt, _ := json.Marshal(data)
+	if evt != nil {
+		s.bus.Publish("honeypot.fingerprint", evt)
 	}
 }

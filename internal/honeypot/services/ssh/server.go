@@ -2,22 +2,28 @@ package ssh
 
 import (
 	"bufio"
+	"encoding/json"
 	"net"
 	"strings"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
 // Server SSH 蜜罐服务（模拟 OpenSSH 9.3）
 type Server struct {
 	logger *log.Logger
+	bus    *bus.Bus
 }
 
 // New 创建 SSH 蜜罐
 func New(logger *log.Logger) *Server {
 	return &Server{logger: logger}
 }
+
+// SetBus 注入事件总线（由蜜罐引擎调用）
+func (s *Server) SetBus(b *bus.Bus) { s.bus = b }
 
 // Handle 处理 SSH 连接
 // 模拟真实 OpenSSH 的多步交互行为：
@@ -80,6 +86,20 @@ func (s *Server) parseClientBanner(banner string, remote string) {
 			"ssh_version", version,
 			"implementation", impl,
 		)
+
+		// 发布协议指纹事件
+		if s.bus != nil {
+			host, _, _ := net.SplitHostPort(remote)
+			evt, _ := json.Marshal(map[string]interface{}{
+				"remote_ip":          host,
+				"service":            "SSH",
+				"ssh_client_version": version,
+				"ssh_impl":           impl,
+			})
+			if evt != nil {
+				s.bus.Publish("honeypot.fingerprint", evt)
+			}
+		}
 	}
 }
 

@@ -2,24 +2,30 @@ package redis
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"strings"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
 // Server Redis 蜜罐服务
 type Server struct {
 	logger *log.Logger
+	bus    *bus.Bus
 }
 
 // New 创建 Redis 蜜罐
 func New(logger *log.Logger) *Server {
 	return &Server{logger: logger}
 }
+
+// SetBus 注入事件总线（由蜜罐引擎调用）
+func (s *Server) SetBus(b *bus.Bus) { s.bus = b }
 
 // Handle 处理 Redis 连接，模拟 RESP 协议交互
 func (s *Server) Handle(conn net.Conn) {
@@ -45,6 +51,9 @@ func (s *Server) Handle(conn net.Conn) {
 
 		cmd := s.readRESP(reader, line)
 		s.logger.Infow("redis command", "remote", remote, "command", cmd)
+
+		// 发布协议指纹事件
+		s.publishFingerprint(remote, cmd)
 
 		resp := s.handleCommand(cmd)
 		if _, err := conn.Write([]byte(resp)); err != nil {
@@ -133,4 +142,20 @@ func (s *Server) fakeConfig() string {
 
 func (s *Server) fakeKeys() string {
 	return "*3\r\n$8\r\nuser:100\r\n$8\r\nuser:200\r\n$6\r\nconfig\r\n"
+}
+
+// publishFingerprint 发布 Redis 协议指纹事件
+func (s *Server) publishFingerprint(remote string, cmd []string) {
+	if s.bus == nil {
+		return
+	}
+	host, _, _ := net.SplitHostPort(remote)
+	evt, _ := json.Marshal(map[string]interface{}{
+		"remote_ip":      host,
+		"service":        "Redis",
+		"redis_commands": cmd,
+	})
+	if evt != nil {
+		s.bus.Publish("honeypot.fingerprint", evt)
+	}
 }

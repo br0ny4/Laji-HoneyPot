@@ -23,7 +23,13 @@ type AttackerFingerprint struct {
 	SSHClientVersion string   `json:"ssh_client_version,omitempty"`
 	SSHImpl          string   `json:"ssh_impl,omitempty"`
 	MySQLUsername    string   `json:"mysql_username,omitempty"`
+	MySQLQuery       string   `json:"mysql_query,omitempty"`
+	FTPUsername      string   `json:"ftp_username,omitempty"`
+	FTPPassword      string   `json:"ftp_password,omitempty"`
 	RedisCommands    []string `json:"redis_commands,omitempty"`
+	TLSSNI           string   `json:"tls_sni,omitempty"`
+	TLSVersion       string   `json:"tls_version,omitempty"`
+	Service          string   `json:"service,omitempty"`
 
 	ToolName    string `json:"tool_name,omitempty"`
 	ToolVersion string `json:"tool_version,omitempty"`
@@ -108,6 +114,59 @@ func (c *Collector) GetAll() []*AttackerFingerprint {
 		result = append(result, fp)
 	}
 	return result
+}
+
+// MergeProtocolData 合并协议层指纹数据到已有记录
+func (c *Collector) MergeProtocolData(ip string, data map[string]interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	fp, ok := c.store[ip]
+	if !ok {
+		fp = &AttackerFingerprint{IP: ip, Timestamp: time.Now()}
+		c.store[ip] = fp
+	}
+
+	if v, ok := data["service"].(string); ok && v != "" {
+		fp.Service = v
+	}
+	if v, ok := data["ssh_client_version"].(string); ok && v != "" {
+		fp.SSHClientVersion = v
+	}
+	if v, ok := data["ssh_impl"].(string); ok && v != "" {
+		fp.SSHImpl = v
+	}
+	if v, ok := data["mysql_username"].(string); ok && v != "" {
+		fp.MySQLUsername = v
+	}
+	if v, ok := data["mysql_query"].(string); ok && v != "" {
+		fp.MySQLQuery = v
+	}
+	if v, ok := data["ftp_username"].(string); ok && v != "" {
+		fp.FTPUsername = v
+	}
+	if v, ok := data["ftp_password"].(string); ok && v != "" {
+		fp.FTPPassword = v
+	}
+	if v, ok := data["redis_commands"]; ok {
+		switch cmds := v.(type) {
+		case []string:
+			fp.RedisCommands = append(fp.RedisCommands, cmds...)
+		case string:
+			fp.RedisCommands = append(fp.RedisCommands, cmds)
+		}
+	}
+	if v, ok := data["tls_sni"].(string); ok && v != "" {
+		fp.TLSSNI = v
+	}
+	if v, ok := data["tls_version"].(string); ok && v != "" {
+		fp.TLSVersion = v
+	}
+	if v, ok := data["tcp_window_size"].(float64); ok {
+		fp.TCPWindowSize = int(v)
+	}
+
+	c.logger.Debugw("protocol fingerprint merged", "ip", ip, "data", data)
 }
 
 // DetectTool 根据指纹识别攻击工具（含浏览器识别）

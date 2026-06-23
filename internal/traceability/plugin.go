@@ -44,6 +44,7 @@ func NewEngine(logger *log.Logger, bus *bus.Bus) *Engine {
 	bus.Subscribe("honeypot.connection", e.onConnection)
 	bus.Subscribe("honeypot.attack", e.onAttack)
 	bus.Subscribe("honeypot.breadcrumb", e.onBreadcrumbTrigger)
+	bus.Subscribe("honeypot.fingerprint", e.onFingerprint)
 
 	return e
 }
@@ -161,6 +162,23 @@ func (e *Engine) onBreadcrumbTrigger(evt bus.Event) {
 			"tool", tool,
 		)
 	}
+}
+
+// onFingerprint 处理协议指纹事件，合并协议数据到攻击者画像
+func (e *Engine) onFingerprint(evt bus.Event) {
+	var evtData map[string]interface{}
+	if err := json.Unmarshal(evt.Payload, &evtData); err != nil {
+		return
+	}
+	remoteIP, _ := evtData["remote_ip"].(string)
+	if remoteIP == "" {
+		return
+	}
+	e.collector.MergeProtocolData(remoteIP, evtData)
+	e.logger.Debugw("protocol fingerprint received",
+		"remote_ip", remoteIP,
+		"service", evtData["service"],
+	)
 }
 
 // GetVulnDB 暴露漏洞库

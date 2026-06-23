@@ -17,7 +17,27 @@ plugins:
     dns_port: 5354
     smb_port: 4450
     rdp_port: 33890
-    tls_fingerprint: "nginx-1.24"
+    # 自定义 HTTP 响应模板（可选，无需修改代码即可添加蜜罐页面）
+    custom_templates:
+      # 示例：模拟 Jenkins 控制台
+      # - path: "/jenkins/"
+      #   status: 200
+      #   content_type: "text/html"
+      #   body: |
+      #     <html><head><title>Jenkins</title></head>
+      #     <body><h1>Welcome to Jenkins</h1></body></html>
+      #   is_breadcrumb: true
+      #
+      # 示例：模拟 Grafana 登录
+      # - path: "/grafana/login"
+      #   status: 200
+      #   content_type: "text/html"
+      #   body: |
+      #     <html><head><title>Grafana</title></head>
+      #     <body><h1>Grafana Login</h1>
+      #     <form><input name="user"/><input name="password" type="password"/></form>
+      #     <!-- /admin/config.php --></body></html>
+      #   is_breadcrumb: false
   traceability-engine:
     enabled: true
     update_interval: "24h"

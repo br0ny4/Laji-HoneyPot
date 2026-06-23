@@ -259,7 +259,7 @@ func (s *Server) handleFingerprints(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.store.GetDetailedStats()
 	info := map[string]interface{}{
-		"version":    "0.8.0",
+		"version":    "0.9.0",
 		"go_version": "go1.22+",
 		"database":   "SQLite (WAL模式)",
 		"services":   "HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP",
@@ -335,7 +335,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.8.0"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.9.0"})
 }
 
 func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
