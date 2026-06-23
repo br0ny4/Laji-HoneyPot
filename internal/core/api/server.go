@@ -41,10 +41,17 @@ func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub) 
 func (s *Server) registerRoutes() {
 	// 仪表盘
 	s.mux.HandleFunc("/api/stats", s.handleStats)
+	s.mux.HandleFunc("/api/stats/detailed", s.handleDetailedStats)
 	// 连接列表
 	s.mux.HandleFunc("/api/connections", s.handleConnections)
 	// 攻击事件
 	s.mux.HandleFunc("/api/attacks", s.handleAttacks)
+	// 攻击者汇总
+	s.mux.HandleFunc("/api/attackers", s.handleAttackers)
+	// 拓扑图数据
+	s.mux.HandleFunc("/api/topology", s.handleTopology)
+	// 指纹数据
+	s.mux.HandleFunc("/api/fingerprints", s.handleFingerprints)
 	// 漏洞数据库
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
 	// 健康检查
@@ -117,6 +124,54 @@ func (s *Server) handleVulns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"total": len(vulns),
 		"vulns": vulns,
+	})
+}
+
+func (s *Server) handleDetailedStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.store.GetDetailedStats()
+	if err != nil {
+		s.logger.Errorw("detailed stats query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleAttackers(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 50)
+	attackers, err := s.store.GetAttackers(limit)
+	if err != nil {
+		s.logger.Errorw("attackers query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":     len(attackers),
+		"attackers": attackers,
+	})
+}
+
+func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
+	td, err := s.store.GetTopologyData()
+	if err != nil {
+		s.logger.Errorw("topology query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, td)
+}
+
+func (s *Server) handleFingerprints(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 50)
+	fps, err := s.store.GetFingerprints(limit)
+	if err != nil {
+		s.logger.Errorw("fingerprints query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":        len(fps),
+		"fingerprints": fps,
 	})
 }
 

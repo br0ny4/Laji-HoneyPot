@@ -271,6 +271,298 @@ func (s *Store) GetFingerprints(limit int) ([]map[string]interface{}, error) {
 	return results, nil
 }
 
+// TopoNode 拓扑图节点
+type TopoNode struct {
+	ID     string                 `json:"id"`
+	Label  string                 `json:"label"`
+	Type   string                 `json:"type"` // attacker, honeypot, hop, asset
+	IP     string                 `json:"ip"`
+	Status string                 `json:"status,omitempty"`
+	Data   map[string]interface{} `json:"data,omitempty"`
+}
+
+// TopoEdge 拓扑图边
+type TopoEdge struct {
+	Source   string                 `json:"source"`
+	Target   string                 `json:"target"`
+	Label    string                 `json:"label"`
+	EdgeType string                 `json:"edgeType"` // attack, countermeasure
+	Data     map[string]interface{} `json:"data,omitempty"`
+}
+
+// TopologyData 拓扑图完整数据
+type TopologyData struct {
+	Nodes []TopoNode `json:"nodes"`
+	Edges []TopoEdge `json:"edges"`
+}
+
+// AttackerSummary 攻击者汇总
+type AttackerSummary struct {
+	RemoteIP      string `json:"remote_ip"`
+	FirstSeen     string `json:"first_seen"`
+	LastSeen      string `json:"last_seen"`
+	AttackCnt     int    `json:"attack_cnt"`
+	ConnCnt       int    `json:"conn_cnt"`
+	Services      string `json:"services"` // 逗号分隔的服务列表
+	BreadcrumbCnt int    `json:"breadcrumb_cnt"`
+	UserAgents    string `json:"user_agents"` // 去重后逗号分隔
+}
+
+// DetailedStats 详细统计数据
+type DetailedStats struct {
+	ActiveServices int               `json:"active_services"`
+	TodayConns     int               `json:"today_conns"`
+	TotalConns     int               `json:"total_conns"`
+	Attackers      int               `json:"attackers"`
+	CounterHits    int               `json:"counter_hits"`
+	FingerprintCnt int               `json:"fingerprint_cnt"`
+	ByService      map[string]int    `json:"by_service"`
+	ByTool         map[string]int    `json:"by_tool"`
+	TopAttackers   []AttackerSummary `json:"top_attackers"`
+}
+
+// GetDetailedStats 获取详细统计数据
+func (s *Store) GetDetailedStats() (*DetailedStats, error) {
+	stats := &DetailedStats{
+		ByService: make(map[string]int),
+		ByTool:    make(map[string]int),
+	}
+
+	s.db.QueryRow("SELECT COUNT(DISTINCT service) FROM connections").Scan(&stats.ActiveServices)
+	if stats.ActiveServices == 0 {
+		stats.ActiveServices = 9
+	}
+
+	today := time.Now().Format("2006-01-02")
+	s.db.QueryRow("SELECT COUNT(*) FROM connections WHERE timestamp >= ?", today).Scan(&stats.TodayConns)
+	s.db.QueryRow("SELECT COUNT(*) FROM connections").Scan(&stats.TotalConns)
+	s.db.QueryRow("SELECT COUNT(DISTINCT remote_ip) FROM connections WHERE timestamp >= ?", today).Scan(&stats.Attackers)
+	s.db.QueryRow("SELECT COUNT(*) FROM attack_events WHERE timestamp >= ?", today).Scan(&stats.CounterHits)
+	s.db.QueryRow("SELECT COUNT(*) FROM fingerprints").Scan(&stats.FingerprintCnt)
+
+	// 按服务统计连接数
+	rows, err := s.db.Query("SELECT service, COUNT(*) as cnt FROM connections GROUP BY service ORDER BY cnt DESC")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var svc string
+			var cnt int
+			if rows.Scan(&svc, &cnt) == nil {
+				stats.ByService[svc] = cnt
+			}
+		}
+	}
+
+	// 按工具统计攻击数
+	rows2, err := s.db.Query("SELECT tool_name, COUNT(*) as cnt FROM attack_events GROUP BY tool_name ORDER BY cnt DESC")
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var tool string
+			var cnt int
+			if rows2.Scan(&tool, &cnt) == nil {
+				stats.ByTool[tool] = cnt
+			}
+		}
+	}
+
+	// TOP 10 攻击者
+	rows3, err := s.db.Query(`
+		SELECT remote_ip, MIN(timestamp), MAX(timestamp), COUNT(*),
+		       (SELECT COUNT(*) FROM attack_events WHERE remote_ip = c.remote_ip),
+		       (SELECT GROUP_CONCAT(DISTINCT service) FROM connections WHERE remote_ip = c.remote_ip),
+		       (SELECT GROUP_CONCAT(DISTINCT user_agent) FROM connections WHERE remote_ip = c.remote_ip AND user_agent != '')
+		FROM connections c
+		GROUP BY remote_ip
+		ORDER BY COUNT(*) DESC LIMIT 10
+	`)
+	if err == nil {
+		defer rows3.Close()
+		for rows3.Next() {
+			var a AttackerSummary
+			var first, last string
+			if rows3.Scan(&a.RemoteIP, &first, &last, &a.ConnCnt, &a.BreadcrumbCnt, &a.Services, &a.UserAgents) == nil {
+				a.FirstSeen = first
+				a.LastSeen = last
+				a.AttackCnt = a.BreadcrumbCnt + a.ConnCnt
+				stats.TopAttackers = append(stats.TopAttackers, a)
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// GetTopologyData 生成攻击路径拓扑数据
+func (s *Store) GetTopologyData() (*TopologyData, error) {
+	td := &TopologyData{
+		Nodes: make([]TopoNode, 0),
+		Edges: make([]TopoEdge, 0),
+	}
+
+	// 1. 攻击者节点 — 来自最近 200 条连接的独特 IP
+	conns, err := s.GetConnections(200)
+	if err != nil {
+		return nil, err
+	}
+	ipSet := make(map[string]bool)
+	ipServices := make(map[string]map[string]bool)
+	for _, c := range conns {
+		ipSet[c.RemoteIP] = true
+		if ipServices[c.RemoteIP] == nil {
+			ipServices[c.RemoteIP] = make(map[string]bool)
+		}
+		ipServices[c.RemoteIP][c.Service] = true
+	}
+
+	for ip := range ipSet {
+		svcList := make([]string, 0)
+		for svc := range ipServices[ip] {
+			svcList = append(svcList, svc)
+		}
+		td.Nodes = append(td.Nodes, TopoNode{
+			ID:    "attacker-" + ip,
+			Label: ip,
+			Type:  "attacker",
+			IP:    ip,
+			Data: map[string]interface{}{
+				"services": svcList,
+			},
+		})
+	}
+
+	// 2. 蜜罐服务节点 — 9 个协议
+	services := []string{"HTTP", "MySQL", "Redis", "SSH", "FTP", "LDAP", "DNS", "SMB", "RDP"}
+	for _, svc := range services {
+		td.Nodes = append(td.Nodes, TopoNode{
+			ID:    "honeypot-" + svc,
+			Label: svc + "蜜罐",
+			Type:  "honeypot",
+			IP:    "0.0.0.0",
+			Data: map[string]interface{}{
+				"service": svc,
+			},
+		})
+	}
+
+	// 3. 核心资产节点（虚拟）
+	coreAssets := []struct {
+		id, label string
+	}{
+		{"asset-core", "核心数据库"},
+		{"asset-api", "API网关"},
+		{"asset-admin", "管理后台"},
+	}
+	for _, a := range coreAssets {
+		td.Nodes = append(td.Nodes, TopoNode{
+			ID:     a.id,
+			Label:  a.label,
+			Type:   "asset",
+			Status: "protected",
+			Data: map[string]interface{}{
+				"description": "内部核心资产",
+			},
+		})
+	}
+
+	// 4. 边 — 攻击者 ↔ 蜜罐（攻击路径）
+	for _, c := range conns {
+		attackerNodeID := "attacker-" + c.RemoteIP
+		honeypotNodeID := "honeypot-" + c.Service
+		dup := false
+		for _, e := range td.Edges {
+			if e.Source == attackerNodeID && e.Target == honeypotNodeID {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			td.Edges = append(td.Edges, TopoEdge{
+				Source:   attackerNodeID,
+				Target:   honeypotNodeID,
+				Label:    c.Service,
+				EdgeType: "attack",
+				Data: map[string]interface{}{
+					"last_time": c.Timestamp.Format("15:04:05"),
+				},
+			})
+		}
+	}
+
+	// 5. 边 — 蜜罐 ↔ 核心资产（防守路径，虚线/浅色）
+	assetLinks := []struct{ source, target, label string }{
+		{"honeypot-HTTP", "asset-admin", "Web入口"},
+		{"honeypot-MySQL", "asset-core", "数据库"},
+		{"honeypot-Redis", "asset-core", "缓存"},
+		{"honeypot-SSH", "asset-core", "运维"},
+		{"honeypot-HTTP", "asset-api", "API"},
+	}
+	for _, al := range assetLinks {
+		td.Edges = append(td.Edges, TopoEdge{
+			Source:   al.source,
+			Target:   al.target,
+			Label:    al.label,
+			EdgeType: "internal",
+		})
+	}
+
+	// 6. 反制边 — 面包屑触发（蓝色）
+	attacks, _ := s.GetAttacks(100)
+	for _, a := range attacks {
+		attackerNodeID := "attacker-" + a.RemoteIP
+		// 根据路径确定目标服务
+		svc := "HTTP" // 默认 HTTP
+		honeypotNodeID := "honeypot-" + svc
+		td.Edges = append(td.Edges, TopoEdge{
+			Source:   honeypotNodeID,
+			Target:   attackerNodeID,
+			Label:    a.ToolName,
+			EdgeType: "countermeasure",
+			Data: map[string]interface{}{
+				"path":      a.Path,
+				"timestamp": a.Timestamp.Format("15:04:05"),
+				"attack_id": a.ID,
+			},
+		})
+	}
+
+	return td, nil
+}
+
+// GetAttackers 获取攻击者列表（含统计汇总）
+func (s *Store) GetAttackers(limit int) ([]AttackerSummary, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT remote_ip, MIN(timestamp), MAX(timestamp), COUNT(*),
+		       (SELECT COUNT(*) FROM attack_events WHERE remote_ip = c.remote_ip),
+		       COALESCE((SELECT GROUP_CONCAT(DISTINCT service) FROM connections WHERE remote_ip = c.remote_ip), ''),
+		       COALESCE((SELECT GROUP_CONCAT(DISTINCT user_agent) FROM connections WHERE remote_ip = c.remote_ip AND user_agent != ''), '')
+		FROM connections c
+		GROUP BY remote_ip
+		ORDER BY COUNT(*) DESC LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []AttackerSummary
+	for rows.Next() {
+		var a AttackerSummary
+		var first, last string
+		if err := rows.Scan(&a.RemoteIP, &first, &last, &a.ConnCnt, &a.BreadcrumbCnt, &a.Services, &a.UserAgents); err != nil {
+			continue
+		}
+		a.FirstSeen = first
+		a.LastSeen = last
+		a.AttackCnt = a.ConnCnt + a.BreadcrumbCnt
+		results = append(results, a)
+	}
+	return results, rows.Err()
+}
+
 // Close 关闭数据库连接
 func (s *Store) Close() error {
 	return s.db.Close()
