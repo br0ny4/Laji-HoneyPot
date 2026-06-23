@@ -165,6 +165,29 @@ func (c *udpConn) SetDeadline(t time.Time) error      { return nil }
 func (c *udpConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *udpConn) SetWriteDeadline(t time.Time) error { return nil }
 
+// bufferedConn 缓冲连接 — 预读数据后仍可完整交付给下游 handler
+type bufferedConn struct {
+	net.Conn
+	buf    []byte // 预读的数据
+	cursor int    // 当前读取位置
+}
+
+func newBufferedConn(conn net.Conn, buf []byte) *bufferedConn {
+	return &bufferedConn{Conn: conn, buf: buf}
+}
+
+func (b *bufferedConn) Read(p []byte) (int, error) {
+	if b.cursor < len(b.buf) {
+		n := copy(p, b.buf[b.cursor:])
+		b.cursor += n
+		if b.cursor >= len(b.buf) {
+			b.buf = nil // 释放已读取的缓冲区
+		}
+		return n, nil
+	}
+	return b.Conn.Read(p)
+}
+
 func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Conn) {
 	return func(conn net.Conn) {
 		defer func() {
@@ -178,11 +201,15 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 		}()
 
 		remote := conn.RemoteAddr().String()
-		host, port, _ := net.SplitHostPort(remote)
+		host, portStr, _ := net.SplitHostPort(remote)
 		portNum := 0
-		if p, err := net.LookupPort("tcp", port); err == nil {
+		if p, err := net.LookupPort("tcp", portStr); err == nil {
 			portNum = p
 		}
+
+		// 被动 TLS ClientHello 检测（缓冲读取，不丢数据）
+		peeked, tlsData := e.detectTLSClientHello(conn, host, portNum, service)
+		wrappedConn := newBufferedConn(conn, peeked)
 
 		e.store.RecordConnection(host, portNum, service, "")
 
@@ -195,7 +222,139 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 			e.bus.Publish("honeypot.connection", evtData)
 		}
 
-		handler(conn)
+		// 协议指纹数据采集
+		e.collectProtocolFingerprint(service, conn, host, tlsData)
+
+		handler(wrappedConn)
+	}
+}
+
+// detectTLSClientHello 被动检测 TLS ClientHello，返回预读数据(用于缓冲连接)和TLS指纹JSON
+func (e *Engine) detectTLSClientHello(conn net.Conn, host string, port int, service string) ([]byte, string) {
+	// 仅对常见 TLS 端口检测
+	tlsPorts := map[int]bool{443: true, 8081: true, 33890: true, 4450: true, 2121: true, 3890: true}
+	if !tlsPorts[port] {
+		return nil, ""
+	}
+
+	rawConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return nil, ""
+	}
+
+	// 读取首字节
+	buf := make([]byte, 1)
+	rawConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	n, err := rawConn.Read(buf)
+	rawConn.SetReadDeadline(time.Time{})
+
+	if err != nil || n == 0 {
+		return buf[:n], ""
+	}
+
+	// TLS ClientHello 首字节为 0x16 (Handshake)
+	if buf[0] != 0x16 {
+		return buf[:n], ""
+	}
+
+	// 读取更多字节解析 ClientHello (最多256字节)
+	hello := make([]byte, 256)
+	copy(hello, buf)
+	rawConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	n, err = rawConn.Read(hello[1:])
+	rawConn.SetReadDeadline(time.Time{})
+	hello = hello[:1+n]
+
+	// 提取 TLS 版本
+	var tlsVersion uint16
+	if len(hello) >= 3 {
+		tlsVersion = uint16(hello[1])<<8 | uint16(hello[2])
+	}
+
+	// 提取 SNI 和 Cipher Suites
+	sni, cipherSuites := parseTLSClientHello(hello)
+
+	fp := map[string]interface{}{
+		"tls_version":   fmt.Sprintf("0x%04x", tlsVersion),
+		"sni":           sni,
+		"cipher_suites": cipherSuites,
+		"detected":      true,
+	}
+	data, _ := json.Marshal(fp)
+	e.logger.Infow("tls client hello detected",
+		"remote", host, "port", port, "service", service,
+		"tls_version", fmt.Sprintf("0x%04x", tlsVersion), "sni", sni)
+
+	return hello, string(data)
+}
+
+// parseTLSClientHello 解析 TLS ClientHello 提取 SNI 和 Cipher Suites
+func parseTLSClientHello(hello []byte) (string, []uint16) {
+	var sni string
+	var cipherSuites []uint16
+
+	if len(hello) < 45 {
+		return sni, cipherSuites
+	}
+
+	// 跳过 TLS record header(5) + handshake header(4) + client version(2) + random(32) + session_id_len(1)
+	pos := 44
+	sidLen := int(hello[pos])
+	pos += 1 + sidLen
+
+	// cipher suites
+	if pos+1 < len(hello) {
+		csLen := int(hello[pos])<<8 | int(hello[pos+1])
+		pos += 2
+		for i := 0; i < csLen/2 && pos+1 < len(hello) && i < 8; i++ {
+			cs := uint16(hello[pos])<<8 | uint16(hello[pos+1])
+			cipherSuites = append(cipherSuites, cs)
+			pos += 2
+		}
+		// 跳过未读取完的 cipher suites
+		pos = 44 + 1 + sidLen + 2 + csLen
+	}
+
+	// compression methods
+	if pos < len(hello) {
+		compLen := int(hello[pos])
+		pos += 1 + compLen
+	}
+
+	// Extensions
+	if pos+1 < len(hello) {
+		extLen := int(hello[pos])<<8 | int(hello[pos+1])
+		pos += 2
+		extEnd := pos + extLen
+		for pos+3 < extEnd && pos+3 < len(hello) {
+			extType := uint16(hello[pos])<<8 | uint16(hello[pos+1])
+			extSize := int(hello[pos+2])<<8 | int(hello[pos+3])
+			pos += 4
+			if extType == 0 && pos+4 < len(hello) {
+				// SNI: server_name_list_len(2) + name_type(1) + name_len(2) + name
+				nameLen := int(hello[pos+3])<<8 | int(hello[pos+4])
+				if pos+5+nameLen <= len(hello) {
+					sni = string(hello[pos+5 : pos+5+nameLen])
+				}
+			}
+			pos += extSize
+		}
+	}
+
+	return sni, cipherSuites
+}
+
+// collectProtocolFingerprint 采集协议指纹数据并通过事件总线发布
+func (e *Engine) collectProtocolFingerprint(service string, conn net.Conn, host string, tlsData string) {
+	// 通过事件总线发布指纹事件，溯源引擎负责消费和持久化
+	evtData, _ := json.Marshal(map[string]interface{}{
+		"remote_ip": host,
+		"service":   service,
+		"tls_data":  tlsData,
+		"timestamp": time.Now().Unix(),
+	})
+	if evtData != nil {
+		e.bus.Publish("honeypot.fingerprint", evtData)
 	}
 }
 

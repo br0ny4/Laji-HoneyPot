@@ -40,7 +40,7 @@ func (r *Registry) Register(p plugin.Plugin) error {
 	return nil
 }
 
-// InitAll 初始化所有已注册插件
+// InitAll 初始化所有已注册插件（跳过 disabled 的插件）
 func (r *Registry) InitAll() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -50,6 +50,10 @@ func (r *Registry) InitAll() error {
 		if !ok {
 			section = config.Section{}
 		}
+		if !section.GetBool("enabled") {
+			r.logger.Infow("plugin disabled by config, skipping init", "name", name)
+			continue
+		}
 		if err := p.Init(section); err != nil {
 			return fmt.Errorf("init plugin %s: %w", name, err)
 		}
@@ -58,12 +62,20 @@ func (r *Registry) InitAll() error {
 	return nil
 }
 
-// StartAll 启动所有已注册插件
+// StartAll 启动所有已注册插件（跳过 disabled 的插件）
 func (r *Registry) StartAll() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	for name, p := range r.plugins {
+		section, ok := r.cfg.Plugins[name]
+		if !ok {
+			section = config.Section{}
+		}
+		if !section.GetBool("enabled") {
+			r.logger.Infow("plugin disabled by config, skipping start", "name", name)
+			continue
+		}
 		if err := p.Start(); err != nil {
 			return fmt.Errorf("start plugin %s: %w", name, err)
 		}

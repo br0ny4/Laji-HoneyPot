@@ -46,6 +46,18 @@ func (e *Engine) Init(cfg config.Section) error {
 
 func (e *Engine) Start() error {
 	e.logger.Info("ops engine started")
+	// 启动后异步拉取竞品情报（不阻塞主流程）
+	go func() {
+		e.logger.Info("starting competitor intelligence gathering")
+		if err := e.comparator.FetchFromGitHub(); err != nil {
+			e.logger.Warnw("competitor fetch failed", "error", err)
+			return
+		}
+		report := e.comparator.GenerateReport()
+		e.logger.Infow("competitor report generated")
+		// 发布竞品报告到事件总线，供 API 或其他组件消费
+		e.bus.Publish("ops.competitor_report", []byte(report))
+	}()
 	return nil
 }
 

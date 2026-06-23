@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,23 +19,25 @@ import (
 
 // Server HTTP API 服务器
 type Server struct {
-	logger *log.Logger
-	store  *store.Store
-	vulnDB *vulndb.DB
-	wsHub  *WSHub
-	mux    *http.ServeMux
-	apiKey string // 管理后台认证密钥，空则不启用
+	logger    *log.Logger
+	store     *store.Store
+	vulnDB    *vulndb.DB
+	wsHub     *WSHub
+	mux       *http.ServeMux
+	apiKey    string // 管理后台认证密钥，空则不启用
+	startTime time.Time
 }
 
 // NewServer 创建 API 服务器
 func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, apiKey string) *Server {
 	s := &Server{
-		logger: logger,
-		store:  st,
-		vulnDB: vdb,
-		wsHub:  hub,
-		mux:    http.NewServeMux(),
-		apiKey: apiKey,
+		logger:    logger,
+		store:     st,
+		vulnDB:    vdb,
+		wsHub:     hub,
+		mux:       http.NewServeMux(),
+		apiKey:    apiKey,
+		startTime: time.Now(),
 	}
 	s.registerRoutes()
 	return s
@@ -59,6 +62,8 @@ func (s *Server) registerRoutes() {
 	// 反制事件
 	s.mux.HandleFunc("/api/countermeasures", s.handleCountermeasures)
 	s.mux.HandleFunc("/api/countermeasures/stats", s.handleCountermeasureStats)
+	// 运行时监控
+	s.mux.HandleFunc("/api/metrics", s.handleMetrics)
 	// 漏洞数据库
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
 	// 健康检查
@@ -290,8 +295,31 @@ func (s *Server) handleCountermeasureStats(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, stats)
 }
 
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	var goroutines = runtime.NumGoroutine()
+
+	metrics := map[string]interface{}{
+		"uptime_seconds": int(time.Since(s.startTime).Seconds()),
+		"goroutines":     goroutines,
+		"memory": map[string]interface{}{
+			"alloc_mb":       float64(mem.Alloc) / 1024 / 1024,
+			"total_alloc_mb": float64(mem.TotalAlloc) / 1024 / 1024,
+			"sys_mb":         float64(mem.Sys) / 1024 / 1024,
+			"num_gc":         mem.NumGC,
+			"heap_objects":   mem.HeapObjects,
+			"heap_inuse_mb":  float64(mem.HeapInuse) / 1024 / 1024,
+			"stack_inuse_kb": float64(mem.StackInuse) / 1024,
+		},
+		"go_version": runtime.Version(),
+		"num_cpu":    runtime.NumCPU(),
+	}
+	writeJSON(w, http.StatusOK, metrics)
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.4.0"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.7.0"})
 }
 
 func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {

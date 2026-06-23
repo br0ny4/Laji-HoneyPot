@@ -30,7 +30,7 @@ func main() {
 	logger := log.New(cfg.LogLevel)
 	eventBus := bus.New()
 
-	logger.Info("Laji-HoneyPot starting", "version", "0.4.0")
+	logger.Info("Laji-HoneyPot starting", "version", "0.7.0")
 
 	st, err := store.New(cfg.DataDir)
 	if err != nil {

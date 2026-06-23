@@ -34,7 +34,7 @@ export default function App() {
       <header className="app-header">
         <div className="header-left">
           <h1 className="app-title">Laji-HoneyPot</h1>
-          <span className="app-version">v0.5.0</span>
+          <span className="app-version">v0.7.0</span>
         </div>
         <div className="header-right">
           <span className="status-indicator status-online" />

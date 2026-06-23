@@ -25,7 +25,10 @@ func (m *mockPlugin) Stop() error                   { m.stopped = true; return n
 
 func TestRegisterAndLifecycle(t *testing.T) {
 	logger := log.New("info")
-	cfg := &config.Config{Plugins: map[string]config.Section{}}
+	cfg := &config.Config{Plugins: map[string]config.Section{
+		"test-a": {"enabled": true},
+		"test-b": {"enabled": true},
+	}}
 	reg := New(logger, cfg)
 
 	p1 := &mockPlugin{name: "test-a", version: "1.0"}
@@ -65,5 +68,40 @@ func TestRegisterAndLifecycle(t *testing.T) {
 	names := reg.List()
 	if len(names) != 2 {
 		t.Errorf("expected 2 plugins, got %d", len(names))
+	}
+}
+
+func TestDisabledPluginSkipsInitAndStart(t *testing.T) {
+	logger := log.New("info")
+	cfg := &config.Config{Plugins: map[string]config.Section{
+		"test-active":   {"enabled": true},
+		"test-disabled": {"enabled": false},
+	}}
+	reg := New(logger, cfg)
+
+	active := &mockPlugin{name: "test-active", version: "1.0"}
+	disabled := &mockPlugin{name: "test-disabled", version: "1.0"}
+
+	reg.Register(active)
+	reg.Register(disabled)
+
+	if err := reg.InitAll(); err != nil {
+		t.Fatalf("initall: %v", err)
+	}
+	if !active.inited {
+		t.Error("active plugin should be inited")
+	}
+	if disabled.inited {
+		t.Error("disabled plugin should NOT be inited")
+	}
+
+	if err := reg.StartAll(); err != nil {
+		t.Fatalf("startall: %v", err)
+	}
+	if !active.started {
+		t.Error("active plugin should be started")
+	}
+	if disabled.started {
+		t.Error("disabled plugin should NOT be started")
 	}
 }

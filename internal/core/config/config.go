@@ -83,7 +83,25 @@ func (s Section) Get(key string) string {
 	}
 }
 
-// GetInt 从 Section 中安全获取 int 值
+// GetBool 从 Section 中安全获取 bool 值
+func (s Section) GetBool(key string) bool {
+	v, ok := s[key]
+	if !ok {
+		return false
+	}
+	switch val := v.(type) {
+	case bool:
+		return val
+	case string:
+		return val == "true" || val == "1"
+	case int:
+		return val != 0
+	case float64:
+		return val != 0
+	default:
+		return false
+	}
+}
 func (s Section) GetInt(key string) int {
 	v, ok := s[key]
 	if !ok {
