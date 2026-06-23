@@ -54,6 +54,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/topology", s.handleTopology)
 	// 指纹数据
 	s.mux.HandleFunc("/api/fingerprints", s.handleFingerprints)
+	// 系统状态
+	s.mux.HandleFunc("/api/system", s.handleSystem)
 	// 漏洞数据库
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
 	// 健康检查
@@ -242,6 +244,23 @@ func (s *Server) handleFingerprints(w http.ResponseWriter, r *http.Request) {
 		"total":        len(fps),
 		"fingerprints": fps,
 	})
+}
+
+func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
+	stats, _ := s.store.GetDetailedStats()
+	info := map[string]interface{}{
+		"version":    "0.5.1",
+		"go_version": "go1.22+",
+		"database":   "SQLite (WAL模式)",
+		"services":   "HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP",
+	}
+	if stats != nil {
+		info["active_services"] = stats.ActiveServices
+		info["total_conns"] = stats.TotalConns
+		info["fingerprint_cnt"] = stats.FingerprintCnt
+		info["attackers_today"] = stats.Attackers
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
