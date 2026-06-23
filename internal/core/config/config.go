@@ -7,13 +7,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// AlertChannelConfig 告警通道配置
+type AlertChannelConfig struct {
+	Type        string   `yaml:"type"`
+	URL         string   `yaml:"url"`
+	Enabled     bool     `yaml:"enabled"`
+	EventFilter []string `yaml:"event_filter,omitempty"`
+}
+
 // Config 顶层配置结构
 type Config struct {
-	LogLevel string             `yaml:"log_level"`
-	Plugins  map[string]Section `yaml:"plugins"`
-	APIAddr  string             `yaml:"api_addr"`
-	DataDir  string             `yaml:"data_dir"`
-	APIKey   string             `yaml:"api_key"`
+	LogLevel      string               `yaml:"log_level"`
+	Plugins       map[string]Section   `yaml:"plugins"`
+	APIAddr       string               `yaml:"api_addr"`
+	DataDir       string               `yaml:"data_dir"`
+	APIKey        string               `yaml:"api_key"`
+	AlertChannels []AlertChannelConfig `yaml:"alerts,omitempty"`
 }
 
 // Section 插件级配置，支持任意键值对

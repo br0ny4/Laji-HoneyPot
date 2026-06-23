@@ -62,6 +62,8 @@ func (s *Server) registerRoutes() {
 	// 反制事件
 	s.mux.HandleFunc("/api/countermeasures", s.handleCountermeasures)
 	s.mux.HandleFunc("/api/countermeasures/stats", s.handleCountermeasureStats)
+	// 端口扫描
+	s.mux.HandleFunc("/api/portscans", s.handlePortScans)
 	// 运行时监控
 	s.mux.HandleFunc("/api/metrics", s.handleMetrics)
 	// 漏洞数据库
@@ -257,7 +259,7 @@ func (s *Server) handleFingerprints(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.store.GetDetailedStats()
 	info := map[string]interface{}{
-		"version":    "0.5.1",
+		"version":    "0.8.0",
 		"go_version": "go1.22+",
 		"database":   "SQLite (WAL模式)",
 		"services":   "HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP",
@@ -295,6 +297,20 @@ func (s *Server) handleCountermeasureStats(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, stats)
 }
 
+func (s *Server) handlePortScans(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 50)
+	scans, err := s.store.GetPortScans(limit)
+	if err != nil {
+		s.logger.Errorw("port scan query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total": len(scans),
+		"scans": scans,
+	})
+}
+
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -319,7 +335,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.7.0"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.8.0"})
 }
 
 func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {

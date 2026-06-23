@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/alerter"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/api"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
@@ -30,7 +31,7 @@ func main() {
 	logger := log.New(cfg.LogLevel)
 	eventBus := bus.New()
 
-	logger.Info("Laji-HoneyPot starting", "version", "0.7.0")
+	logger.Info("Laji-HoneyPot starting", "version", "0.8.0")
 
 	st, err := store.New(cfg.DataDir)
 	if err != nil {
@@ -80,6 +81,37 @@ func main() {
 	eventBus.Subscribe("honeypot.connection", func(evt bus.Event) { wsHub.BroadcastStats() })
 	eventBus.Subscribe("honeypot.attack", func(evt bus.Event) { wsHub.BroadcastStats() })
 	eventBus.Subscribe("honeypot.breadcrumb", func(evt bus.Event) { wsHub.BroadcastStats() })
+	eventBus.Subscribe("honeypot.portscan", func(evt bus.Event) { wsHub.BroadcastStats() })
+
+	// 告警通道：面包屑/攻击事件 → 多通道推送
+	if len(cfg.AlertChannels) > 0 {
+		alertChannels := make([]alerter.ChannelConfig, 0, len(cfg.AlertChannels))
+		for _, ac := range cfg.AlertChannels {
+			alertChannels = append(alertChannels, alerter.ChannelConfig{
+				Type:        alerter.ChannelType(ac.Type),
+				URL:         ac.URL,
+				Enabled:     ac.Enabled,
+				EventFilter: ac.EventFilter,
+			})
+		}
+		alertSvc := alerter.New(logger.SugaredLogger, alertChannels)
+		eventBus.Subscribe("honeypot.breadcrumb", func(evt bus.Event) {
+			if event := alerter.BuildAlertEvent(evt.Topic, evt.Payload); event != nil {
+				alertSvc.Send(*event)
+			}
+		})
+		eventBus.Subscribe("honeypot.attack", func(evt bus.Event) {
+			if event := alerter.BuildAlertEvent(evt.Topic, evt.Payload); event != nil {
+				alertSvc.Send(*event)
+			}
+		})
+		eventBus.Subscribe("honeypot.portscan", func(evt bus.Event) {
+			if event := alerter.BuildAlertEvent(evt.Topic, evt.Payload); event != nil {
+				alertSvc.Send(*event)
+			}
+		})
+		logger.Infow("alerter initialized", "channels", len(alertChannels))
+	}
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, cfg.APIKey)
 	httpSrv := &http.Server{

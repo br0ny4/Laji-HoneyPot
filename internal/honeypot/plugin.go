@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
@@ -34,15 +38,30 @@ type Engine struct {
 	activeSvcs       int
 	httpSrv          *httpSvc.Server                               // HTTP 蜜罐实例
 	countermeasureFn func(path, userAgent, remoteIP string) string // 面包屑触发的反制 JS 注入回调
+	scanMu           sync.Mutex
+	scanTracker      map[string]*scanState // IP -> 扫描状态
 }
+
+type scanState struct {
+	ports map[int]bool
+	first time.Time
+	last  time.Time
+	svc   string
+}
+
+const (
+	portScanThreshold = 5  // 不同端口数阈值
+	portScanWindow    = 60 // 扫描窗口(秒)
+)
 
 // NewEngine 创建蜜罐引擎
 func NewEngine(logger *log.Logger, bus *bus.Bus, st *store.Store) *Engine {
 	return &Engine{
-		logger: logger,
-		bus:    bus,
-		store:  st,
-		stack:  tcpstack.New(logger),
+		logger:      logger,
+		bus:         bus,
+		store:       st,
+		stack:       tcpstack.New(logger),
+		scanTracker: make(map[string]*scanState),
 	}
 }
 
@@ -114,6 +133,79 @@ func (e *Engine) Init(cfg config.Section) error {
 
 	e.logger.Infow("honeypot engine initialized", "active_services", e.activeSvcs)
 	return nil
+}
+
+// detectPortScan 基于连接频率的端口扫描检测
+func (e *Engine) detectPortScan(remoteIP string, port int, service string) {
+	e.scanMu.Lock()
+	defer e.scanMu.Unlock()
+
+	now := time.Now()
+	state, exists := e.scanTracker[remoteIP]
+
+	if !exists {
+		e.scanTracker[remoteIP] = &scanState{
+			ports: map[int]bool{port: true},
+			first: now,
+			last:  now,
+			svc:   service,
+		}
+		return
+	}
+
+	// 清理过期状态（扫描窗口外的重置）
+	if now.Sub(state.first) > time.Duration(portScanWindow)*time.Second {
+		state.ports = map[int]bool{port: true}
+		state.first = now
+		state.last = now
+		state.svc = service
+		return
+	}
+
+	state.ports[port] = true
+	state.last = now
+
+	// 达到阈值 → 触发扫描告警
+	if len(state.ports) >= portScanThreshold {
+		portsList := make([]int, 0, len(state.ports))
+		for p := range state.ports {
+			portsList = append(portsList, p)
+		}
+		sort.Ints(portsList)
+		portsStr := intsToStr(portsList)
+
+		e.logger.Warnw("PORT SCAN DETECTED",
+			"remote", remoteIP,
+			"ports", portsStr,
+			"count", len(state.ports),
+			"duration", int(now.Sub(state.first).Seconds()),
+		)
+
+		// 持久化
+		e.store.RecordPortScan(remoteIP, portsStr, len(state.ports),
+			int(now.Sub(state.first).Seconds()), state.svc)
+
+		// 发布扫描事件
+		evtData, _ := json.Marshal(map[string]interface{}{
+			"remote_ip":   remoteIP,
+			"ports":       portsStr,
+			"ports_count": len(state.ports),
+			"duration":    int(now.Sub(state.first).Seconds()),
+			"service":     state.svc,
+		})
+		e.bus.Publish("honeypot.portscan", evtData)
+
+		// 重置状态，避免重复告警
+		delete(e.scanTracker, remoteIP)
+	}
+}
+
+func intsToStr(arr []int) string {
+	parts := make([]string, len(arr))
+	for i, v := range arr {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (e *Engine) udpLoop(pc net.PacketConn, handler func(net.Conn), port int) {
@@ -212,6 +304,9 @@ func (e *Engine) wrapHandler(service string, handler func(net.Conn)) func(net.Co
 		wrappedConn := newBufferedConn(conn, peeked)
 
 		e.store.RecordConnection(host, portNum, service, "")
+
+		// 端口扫描检测：基于连接频率分析
+		e.detectPortScan(host, portNum, service)
 
 		evtData, err := json.Marshal(map[string]interface{}{
 			"remote_ip": host, "port": portNum, "service": service,

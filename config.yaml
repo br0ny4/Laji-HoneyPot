@@ -23,3 +23,23 @@ plugins:
     update_interval: "24h"
   ops-engine:
     enabled: true
+
+# 告警通道配置（可选，不配置则不启用告警）
+alerts:
+  # 通用 Webhook（JSON POST 到指定 URL）
+  # - type: webhook
+  #   enabled: true
+  #   url: "https://your-server.com/honeypot/alerts"
+  #   event_filter: ["breadcrumb", "attack"]  # 可选，空=全部事件
+  #
+  # 钉钉机器人
+  # - type: dingtalk
+  #   enabled: true
+  #   url: "https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN"
+  #   event_filter: ["breadcrumb"]
+  #
+  # 飞书机器人
+  # - type: feishu
+  #   enabled: true
+  #   url: "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK"
+  #   event_filter: ["breadcrumb", "attack"]

@@ -120,6 +120,18 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_cm_ip ON countermeasure_events(remote_ip);
 	CREATE INDEX IF NOT EXISTS idx_cm_ts ON countermeasure_events(timestamp);
+
+	CREATE TABLE IF NOT EXISTS port_scan_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		remote_ip TEXT NOT NULL,
+		ports TEXT DEFAULT '',
+		ports_count INTEGER DEFAULT 0,
+		duration INTEGER DEFAULT 0,
+		service TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_ps_ip ON port_scan_events(remote_ip);
+	CREATE INDEX IF NOT EXISTS idx_ps_ts ON port_scan_events(timestamp);
 	`
 	_, err := s.db.Exec(ddl)
 	return err
@@ -673,6 +685,56 @@ func (s *Store) MarkCountermeasureEffective(remoteIP string) error {
 		remoteIP,
 	)
 	return err
+}
+
+// PortScanEvent 端口扫描事件
+type PortScanEvent struct {
+	ID         int64  `json:"id"`
+	Timestamp  string `json:"timestamp"`
+	RemoteIP   string `json:"remote_ip"`
+	PortsCount int    `json:"ports_count"`
+	Ports      string `json:"ports"`    // 逗号分隔的端口列表
+	Duration   int    `json:"duration"` // 扫描窗口(秒)
+	Service    string `json:"service"`  // 首个命中服务
+}
+
+// RecordPortScan 记录端口扫描事件
+func (s *Store) RecordPortScan(remoteIP, ports string, portsCount, duration int, service string) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO port_scan_events (remote_ip, ports, ports_count, duration, service)
+		 VALUES (?, ?, ?, ?, ?)`,
+		remoteIP, ports, portsCount, duration, service,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetPortScans 获取端口扫描事件列表
+func (s *Store) GetPortScans(limit int) ([]PortScanEvent, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		`SELECT id, timestamp, remote_ip, ports, ports_count, duration, service
+		 FROM port_scan_events ORDER BY timestamp DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []PortScanEvent
+	for rows.Next() {
+		var e PortScanEvent
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.RemoteIP, &e.Ports, &e.PortsCount, &e.Duration, &e.Service); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
 }
 
 // Close 关闭数据库连接
