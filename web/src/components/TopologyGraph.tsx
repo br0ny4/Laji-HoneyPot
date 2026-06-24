@@ -125,6 +125,7 @@ export default function TopologyGraph() {
   const [loading, setLoading] = useState(true);
   const [expandedChains, setExpandedChains] = useState<Set<string>>(new Set());
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   const fetchTopology = useCallback(async () => {
     try {
@@ -148,126 +149,133 @@ export default function TopologyGraph() {
     if (!containerRef.current || !topoData) return;
     if (graphRef.current) { graphRef.current.destroy(); graphRef.current = null; }
 
-    const width = containerRef.current.clientWidth || 900;
-    const height = 500;
+    setRenderError(null);
 
-    // 转换节点
-    const g6Nodes = topoData.nodes.map((n) => {
-      const colors = NODE_COLORS[n.type] || { fill: '#6b7280', stroke: '#4b5563' };
-      const isAttacker = n.type === 'attacker';
-      return {
-        id: n.id,
-        data: { ...n, label: n.label },
-        style: {
-          fill: colors.fill,
-          stroke: colors.stroke,
-          lineWidth: 2,
-          radius: isAttacker ? 20 : 6,
-          size: [Math.max(n.label.length * 10 + 20, 110), 32] as [number, number],
-          labelText: n.label,
-          labelFill: '#e2e8f0',
-          labelFontSize: 11,
-          labelFontFamily: "'SF Mono','Fira Code',monospace",
-          labelPlacement: 'center' as const,
+    try {
+      const width = containerRef.current.clientWidth || 900;
+      const height = 500;
+
+      // 转换节点
+      const g6Nodes = topoData.nodes.map((n) => {
+        const colors = NODE_COLORS[n.type] || { fill: '#6b7280', stroke: '#4b5563' };
+        const isAttacker = n.type === 'attacker';
+        return {
+          id: n.id,
+          data: { ...n, label: n.label },
+          style: {
+            fill: colors.fill,
+            stroke: colors.stroke,
+            lineWidth: 2,
+            radius: isAttacker ? 20 : 6,
+            size: [Math.max(n.label.length * 10 + 20, 110), 32] as [number, number],
+            labelText: n.label,
+            labelFill: '#e2e8f0',
+            labelFontSize: 11,
+            labelFontFamily: "'SF Mono','Fira Code',monospace",
+            labelPlacement: 'center' as const,
+          },
+        };
+      });
+
+      // 转换边
+      const g6Edges = topoData.edges.map((e) => {
+        const style = EDGE_STYLES[e.edgeType] || EDGE_STYLES.attack;
+        return {
+          source: e.source,
+          target: e.target,
+          data: { ...e },
+          style: {
+            stroke: e.edgeType === 'countermeasure' ? '#06b6d4' : style.stroke,
+            lineWidth: style.lineWidth,
+            lineDash: style.lineDash,
+            targetArrow: true,
+            labelText: e.label,
+            labelFill: '#94a3b8',
+            labelFontSize: 9,
+            labelBackground: true,
+            labelBackgroundFill: '#0f172a',
+            labelBackgroundOpacity: 0.85,
+          },
+          state: {},
+        };
+      });
+
+      const graph = new Graph({
+        container: containerRef.current,
+        width,
+        height,
+        data: { nodes: g6Nodes, edges: g6Edges },
+        layout: {
+          type: 'dagre',
+          rankdir: 'TB',
+          ranksep: 80,
+          nodesep: 40,
         },
-      };
-    });
-
-    // 转换边
-    const g6Edges = topoData.edges.map((e) => {
-      const style = EDGE_STYLES[e.edgeType] || EDGE_STYLES.attack;
-      return {
-        source: e.source,
-        target: e.target,
-        data: { ...e },
-        style: {
-          stroke: e.edgeType === 'countermeasure' ? '#06b6d4' : style.stroke,
-          lineWidth: style.lineWidth,
-          lineDash: style.lineDash,
-          targetArrow: true,
-          labelText: e.label,
-          labelFill: '#94a3b8',
-          labelFontSize: 9,
-          labelBackground: true,
-          labelBackgroundFill: '#0f172a',
-          labelBackgroundOpacity: 0.85,
+        behaviors: ['drag-canvas', 'zoom-canvas'],
+        autoFit: 'view',
+        animation: true,
+        node: {
+          style: { cursor: 'pointer' },
         },
-        state: {},
-      };
-    });
+        edge: {
+          style: { cursor: 'pointer' },
+        },
+      });
 
-    const graph = new Graph({
-      container: containerRef.current,
-      width,
-      height,
-      data: { nodes: g6Nodes, edges: g6Edges },
-      layout: {
-        type: 'dagre',
-        rankdir: 'TB',
-        ranksep: 80,
-        nodesep: 40,
-      },
-      behaviors: ['drag-canvas', 'zoom-canvas'],
-      autoFit: 'view',
-      animation: true,
-      node: {
-        style: { cursor: 'pointer' },
-      },
-      edge: {
-        style: { cursor: 'pointer' },
-      },
-    });
+      graph.render();
 
-    graph.render();
-
-    // 节点点击
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    graph.on('node:click', (evt: any) => {
-      const nodeId = evt.target?.id;
-      const nodeData = topoData.nodes.find((n) => n.id === nodeId);
-      if (nodeData) {
-        setHighlightPath(null);
-        setDetail({
-          type: 'node',
-          id: nodeData.id,
-          label: nodeData.label,
-          nodeType: nodeData.type,
-          ip: nodeData.ip || '',
-          status: nodeData.status,
-          data: nodeData.data,
-        });
-      }
-    });
-
-    // 边点击 — 高亮溯源反制路径
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    graph.on('edge:click', (evt: any) => {
-      const edgeId = evt.target?.id;
-      const edgeData = topoData.edges.find(
-        (e) => `${e.source}-${e.target}` === edgeId
-      );
-      if (edgeData) {
-        if (edgeData.edgeType === 'countermeasure') {
-          setHighlightPath(`${edgeData.source}-${edgeData.target}`);
+      // 节点点击
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      graph.on('node:click', (evt: any) => {
+        const nodeId = evt.target?.id;
+        const nodeData = topoData.nodes.find((n) => n.id === nodeId);
+        if (nodeData) {
+          setHighlightPath(null);
+          setDetail({
+            type: 'node',
+            id: nodeData.id,
+            label: nodeData.label,
+            nodeType: nodeData.type,
+            ip: nodeData.ip || '',
+            status: nodeData.status,
+            data: nodeData.data,
+          });
         }
-        setDetail({
-          type: 'edge',
-          id: `${edgeData.source} → ${edgeData.target}`,
-          label: edgeData.label,
-          edgeType: edgeData.edgeType,
-          tactic: edgeData.tactic,
-          techniqueID: edgeData.techniqueID,
-          data: edgeData.data,
-        });
-      }
-    });
+      });
 
-    graph.on('canvas:click', () => {
-      setDetail(null);
-      setHighlightPath(null);
-    });
+      // 边点击 — 高亮溯源反制路径
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      graph.on('edge:click', (evt: any) => {
+        const edgeId = evt.target?.id;
+        const edgeData = topoData.edges.find(
+          (e) => `${e.source}-${e.target}` === edgeId
+        );
+        if (edgeData) {
+          if (edgeData.edgeType === 'countermeasure') {
+            setHighlightPath(`${edgeData.source}-${edgeData.target}`);
+          }
+          setDetail({
+            type: 'edge',
+            id: `${edgeData.source} → ${edgeData.target}`,
+            label: edgeData.label,
+            edgeType: edgeData.edgeType,
+            tactic: edgeData.tactic,
+            techniqueID: edgeData.techniqueID,
+            data: edgeData.data,
+          });
+        }
+      });
 
-    graphRef.current = graph;
+      graph.on('canvas:click', () => {
+        setDetail(null);
+        setHighlightPath(null);
+      });
+
+      graphRef.current = graph;
+    } catch (err) {
+      console.error('[TopologyGraph] G6 渲染失败:', err);
+      setRenderError(err instanceof Error ? err.message : '图形渲染异常，请刷新重试');
+    }
 
     const handleResize = () => {
       if (containerRef.current && graphRef.current) {
@@ -451,7 +459,17 @@ export default function TopologyGraph() {
 
       {/* 拓扑图主体 */}
       <div className="topology-main">
-        <div ref={containerRef} className="topology-graph" style={{ minHeight: 500 }} />
+        {renderError ? (
+          <div className="topology-error">
+            <div className="topology-error-icon">⚠</div>
+            <div className="topology-error-msg">{renderError}</div>
+            <button className="btn-refresh" onClick={() => { setRenderError(null); fetchTopology(); }}>
+              重新加载
+            </button>
+          </div>
+        ) : (
+          <div ref={containerRef} className="topology-graph" style={{ minHeight: 500 }} />
+        )}
 
         {/* 详情侧边栏 */}
         {detail && (

@@ -660,8 +660,14 @@ func (s *Store) GetTopologyData() (*TopologyData, error) {
 	attacks, _ := s.GetAttacks(100)
 	ipCounters := make(map[string][]Countermeasure) // attackerIP -> counters
 	for _, a := range attacks {
+		// 剥离端口号 — attack_events 中的 remote_ip 格式为 "IP:port"，
+		// 但攻击者节点以纯 IP 为 key，必须统一格式
+		cleanIP := a.RemoteIP
+		if idx := strings.LastIndexByte(a.RemoteIP, ':'); idx > 0 {
+			cleanIP = a.RemoteIP[:idx]
+		}
 		tactic, techniqueID, tacticLabel := mapBreadcrumbToTactic(a.Path)
-		attackerNodeID := "attacker-" + a.RemoteIP
+		attackerNodeID := "attacker-" + cleanIP
 		td.Edges = append(td.Edges, TopoEdge{
 			Source:      "honeypot-HTTP",
 			Target:      attackerNodeID,
@@ -676,7 +682,7 @@ func (s *Store) GetTopologyData() (*TopologyData, error) {
 				"tactic_label": tacticLabel,
 			},
 		})
-		ipCounters[a.RemoteIP] = append(ipCounters[a.RemoteIP], Countermeasure{
+		ipCounters[cleanIP] = append(ipCounters[cleanIP], Countermeasure{
 			ToolName:    a.ToolName,
 			Path:        a.Path,
 			Tactic:      tactic,
