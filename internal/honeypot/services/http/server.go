@@ -133,6 +133,13 @@ func (s *Server) Handle(conn net.Conn, onBreadcrumb BreadcrumbCallback) {
 
 		// 检测是否为面包屑路径 — 触碰即判定为攻击者
 		breadcrumbTriggered := false
+
+		// /api/collect 指纹采集端点 — 拦截并入库（浏览器被动指纹 + 反制载荷均通过此路径上报）
+		if strings.HasPrefix(path, "/api/collect") {
+			s.handleCollectFingerprint(conn, remote, path, httpVersion, ua)
+			return // 采集后关闭连接（Image 信标无需 keep-alive）
+		}
+
 		if s.isBreadcrumb(path) {
 			breadcrumbTriggered = true
 			s.logger.Warnw("BREADCRUMB TRIGGERED - ATTACKER DETECTED",
@@ -169,6 +176,73 @@ func (s *Server) SetCountermeasureCallback(fn CountermeasureCallback) {
 // SetDecoyPageCallback 设置诱饵页面回调（如冰蝎 JSP、Cobalt Strike 反制页面）
 func (s *Server) SetDecoyPageCallback(fn DecoyPageCallback) {
 	s.decoyPageCB = fn
+}
+
+// handleCollectFingerprint 处理浏览器指纹采集请求。
+// 浏览器被动指纹 JS 和反制载荷均通过 new Image().src='/api/collect?d=...' 上报，
+// 该请求发往 HTTP 蜜罐端口而非 API 服务器端口，因此需要在蜜罐层拦截并入库。
+func (s *Server) handleCollectFingerprint(conn net.Conn, remote, path, _, ua string) {
+	// 解析查询参数 ?d=<url-encoded-json>
+	qIdx := strings.Index(path, "?")
+	if qIdx < 0 {
+		return
+	}
+	query := path[qIdx+1:]
+	// 提取 d= 参数
+	rawData := ""
+	for _, pair := range strings.Split(query, "&") {
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) == 2 && kv[0] == "d" {
+			rawData = kv[1]
+			break
+		}
+	}
+	if rawData == "" {
+		return
+	}
+
+	host, _, _ := net.SplitHostPort(remote)
+
+	// 生成 tracking ID（从请求头中读取 Cookie 或新建）
+	trackingID := "hp-" + fmt.Sprintf("%x", time.Now().UnixNano())[:8]
+
+	if s.store != nil {
+		s.store.RecordFingerprint(trackingID, host, ua, rawData)
+		s.logger.Infow("fingerprint collected via honeypot",
+			"remote", remote,
+			"data_len", len(rawData),
+		)
+	}
+
+	// 返回 1x1 透明 GIF（模拟 /api/collect 在 API 服务器的行为）
+	transparentGIF := []byte{
+		'G', 'I', 'F', '8', '9', 'a', // GIF89a
+		0x01, 0x00, 0x01, 0x00, 0x80, 0x01, 0x00, // width=1 height=1
+		0x00, 0x00, 0x00, // transparent bg
+		0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, // Graphic Control Extension
+		0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, // Image Descriptor
+		0x02, 0x02, 0x4c, 0x01, 0x00, // Image Data
+		0x3b, // Trailer
+	}
+
+	now := time.Now().UTC()
+	resp := fmt.Sprintf(
+		"HTTP/1.1 200 OK\r\n"+
+			"Date: %s\r\n"+
+			"Server: nginx/1.24.0\r\n"+
+			"Content-Type: image/gif\r\n"+
+			"Content-Length: %d\r\n"+
+			"Cache-Control: no-cache, no-store, must-revalidate\r\n"+
+			"Pragma: no-cache\r\n"+
+			"Expires: 0\r\n"+
+			"Set-Cookie: _hp_track=%s; Path=/; Max-Age=31536000; SameSite=Lax\r\n"+
+			"\r\n",
+		now.Format("Mon, 02 Jan 2006 15:04:05 GMT"),
+		len(transparentGIF),
+		trackingID,
+	)
+	conn.Write([]byte(resp))
+	conn.Write(transparentGIF)
 }
 
 // SetCustomTemplates 设置 YAML 自定义响应模板
@@ -247,7 +321,7 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 		// Swagger API 文档 — JSON
 		contentType = "application/json"
 		body = s.fakeSwaggerDocs(path)
-	} else if strings.Contains(path, "api") || strings.Contains(path, "swagger") {
+	} else if (strings.Contains(path, "api") && !strings.HasPrefix(path, "/api/collect")) || strings.Contains(path, "swagger") {
 		contentType = "application/json"
 		body = s.fakeAPIResponse(path)
 	} else if strings.Contains(path, ".git") || strings.Contains(path, "backup") || strings.Contains(path, ".sql") {

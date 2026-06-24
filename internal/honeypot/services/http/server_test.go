@@ -4,10 +4,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
+	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 )
 
 func TestHTTPHoneypotRoot(t *testing.T) {
@@ -637,5 +640,163 @@ func TestDecoyPageCallbackIntegration(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !contains(string(body), "DECOY_RESPONSE") {
 		t.Error("expected DECOY_RESPONSE in body")
+	}
+}
+
+// TestFingerprintCollection 验证浏览器指纹通过 /api/collect 上报时被正确拦截并入库
+func TestFingerprintCollection(t *testing.T) {
+	// 创建临时 SQLite 数据库用于测试
+	tmpDir, err := os.MkdirTemp("", "hp-http-test-*")
+	if err != nil {
+		t.Fatalf("temp dir failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	st, err := store.New(tmpDir)
+	if err != nil {
+		t.Fatalf("store init failed: %v", err)
+	}
+	defer st.Close()
+
+	logger := log.New("debug")
+	srv := New(logger, st)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:19988")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, nil)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	// 模拟浏览器 JS: new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(data))
+	fingerprintData := url.QueryEscape(`{"canvas":"hash123","gpu":"Apple M1","scr":"1920x1080","tz":"Asia/Shanghai"}`)
+	resp, err := http.Get("http://127.0.0.1:19988/api/collect?d=" + fingerprintData)
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 验证返回 1x1 GIF
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !contains(ct, "image/gif") {
+		t.Errorf("expected image/gif, got %s", ct)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if len(body) < 30 {
+		t.Errorf("expected GIF body, got %d bytes", len(body))
+	}
+
+	// 验证 cookie 设置
+	cookie := resp.Header.Get("Set-Cookie")
+	if !contains(cookie, "_hp_track") {
+		t.Errorf("expected _hp_track cookie, got %s", cookie)
+	}
+
+	// 验证指纹数据已入库
+	fps, err := st.GetFingerprints(10)
+	if err != nil {
+		t.Fatalf("GetFingerprints failed: %v", err)
+	}
+	if len(fps) == 0 {
+		t.Fatal("fingerprint not stored — /api/collect interception failed")
+	}
+
+	fp := fps[0]
+	if rawData, ok := fp["raw_data"].(string); !ok || !contains(rawData, "canvas") {
+		t.Errorf("expected raw_data to contain canvas, got: %s", rawData)
+	}
+}
+
+// TestFingerprintCollectExcludedFromFakeAPI 验证 /api/collect 路径不被 fakeAPIResponse 吞掉
+func TestFingerprintCollectNotFakeAPI(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hp-http-test2-*")
+	if err != nil {
+		t.Fatalf("temp dir failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	st, err := store.New(tmpDir)
+	if err != nil {
+		t.Fatalf("store init failed: %v", err)
+	}
+	defer st.Close()
+
+	logger := log.New("debug")
+	srv := New(logger, st)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:19987")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, nil)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	// 访问 /api/collect 应返回 GIF，非 JSON
+	resp, err := http.Get("http://127.0.0.1:19987/api/collect?d=test")
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	// 不应包含 fake API response 的特征 JSON
+	if contains(bodyStr, `"status":"ok"`) {
+		t.Error("/api/collect should NOT return fake API JSON response")
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !contains(ct, "image/gif") {
+		t.Errorf("expected image/gif, got %s", ct)
+	}
+}
+
+// TestOtherAPIPathsStillReturnFakeAPI 验证其他 /api/* 路径仍然返回 fake JSON
+func TestOtherAPIPathsStillReturnFakeAPI(t *testing.T) {
+	srv := New(log.New("debug"), nil)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:19986")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, _ := ln.Accept()
+		srv.Handle(conn, nil)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+
+	resp, err := http.Get("http://127.0.0.1:19986/api/v1/users")
+	if err != nil {
+		t.Fatalf("http get failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	ct := resp.Header.Get("Content-Type")
+	if !contains(ct, "application/json") {
+		t.Errorf("expected application/json for other /api paths, got %s", ct)
+	}
+	if !contains(bodyStr, `"status":"ok"`) {
+		t.Error("other /api/* paths should still return fake API JSON")
 	}
 }
