@@ -72,7 +72,7 @@ func TestAdminLoginPage(t *testing.T) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	if !contains(string(body), "Administrator Login") {
+	if !contains(string(body), "Enterprise Console") {
 		t.Errorf("unexpected body: %s", string(body))
 	}
 }

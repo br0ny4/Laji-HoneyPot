@@ -19,25 +19,52 @@ plugins:
     rdp_port: 33890
     # 自定义 HTTP 响应模板（可选，无需修改代码即可添加蜜罐页面）
     custom_templates:
-      # 示例：模拟 Jenkins 控制台
-      # - path: "/jenkins/"
-      #   status: 200
-      #   content_type: "text/html"
-      #   body: |
-      #     <html><head><title>Jenkins</title></head>
-      #     <body><h1>Welcome to Jenkins</h1></body></html>
-      #   is_breadcrumb: true
-      #
-      # 示例：模拟 Grafana 登录
-      # - path: "/grafana/login"
-      #   status: 200
-      #   content_type: "text/html"
-      #   body: |
-      #     <html><head><title>Grafana</title></head>
-      #     <body><h1>Grafana Login</h1>
-      #     <form><input name="user"/><input name="password" type="password"/></form>
-      #     <!-- /admin/config.php --></body></html>
-      #   is_breadcrumb: false
+      # 模拟 Jenkins 控制台
+      - path: "/jenkins/"
+        status: 200
+        content_type: "text/html"
+        body: |
+          <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Dashboard [Jenkins]</title>
+          <style>body{font-family:sans-serif;background:#f3f3f3;margin:0}
+          .header{background:#111;color:#fff;padding:8px 20px;font-size:14px}
+          .header a{color:#f0ad4e;text-decoration:none}
+          .content{padding:20px}
+          table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+          th{background:#f5f5f5;padding:8px 12px;text-align:left;font-size:13px;border-bottom:2px solid #ddd}
+          td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}
+          .success{color:green}.failed{color:red}</style></head>
+          <body><div class="header">Jenkins <a href="/jenkins/script">Script Console</a></div>
+          <div class="content"><h2>Build History</h2><table><tr><th>#</th><th>Project</th><th>Status</th><th>Duration</th></tr>
+          <tr><td>342</td><td>backend-deploy</td><td class="success">SUCCESS</td><td>2m 34s</td></tr>
+          <tr><td>341</td><td>frontend-build</td><td class="success">SUCCESS</td><td>1m 12s</td></tr>
+          <tr><td>340</td><td>integration-test</td><td class="failed">FAILED</td><td>4m 51s</td></tr></table>
+          </div></body></html>
+          <!-- /jenkins/script -->
+        is_breadcrumb: false
+
+      # 模拟 Grafana 登录
+      - path: "/grafana/login"
+        status: 200
+        content_type: "text/html"
+        body: |
+          <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Grafana</title>
+          <style>body{font-family:'Open Sans',sans-serif;background:#1e1e2d;margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh}
+          .login{background:#222;padding:40px;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.3);width:320px}
+          h2{color:#d8d9da;text-align:center;margin-bottom:24px;font-weight:400}
+          .field{margin-bottom:16px}
+          .field label{display:block;color:#8e8e8e;font-size:12px;margin-bottom:4px;text-transform:uppercase}
+          .field input{width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:2px;color:#d8d9da;font-size:14px}
+          .field input:focus{border-color:#f2cc0c;outline:none}
+          .btn{width:100%;padding:10px;background:#f2cc0c;color:#000;border:none;border-radius:2px;font-size:14px;font-weight:600;cursor:pointer}
+          .btn:hover{background:#e5b800}
+          .footer{text-align:center;margin-top:20px;color:#555;font-size:11px}</style></head>
+          <body><div class="login"><h2>Welcome to Grafana</h2>
+          <form method="POST" action="/grafana/login"><div class="field"><label>Email or username</label><input type="text" name="user" /></div>
+          <div class="field"><label>Password</label><input type="password" name="password" /></div>
+          <button type="submit" class="btn">Log in</button></form>
+          <div class="footer">Grafana v9.5.2</div></div></body></html>
+          <!-- /admin/config.php -->
+        is_breadcrumb: false
   traceability-engine:
     enabled: true
     update_interval: "24h"

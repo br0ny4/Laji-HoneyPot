@@ -22,10 +22,11 @@ type Server struct {
 	store       *store.Store
 	breadcrumbs []string // 面包屑路径列表
 	// 浏览器反制 JS Payload，在每个 HTML 页面中自动注入
-	fingerprintJS    string
-	countermeasureCB CountermeasureCallback // 面包屑触发时的额外反制 JS 回调
-	decoyPageCB      DecoyPageCallback      // 诱饵页面回调（JSP/CS 等完整页面）
-	customTemplates  []CustomTemplate       // YAML 自定义响应模板
+	fingerprintJS       string
+	countermeasureCB    CountermeasureCallback // 面包屑触发时的额外反制 JS 回调
+	decoyPageCB         DecoyPageCallback      // 诱饵页面回调（JSP/CS 等完整页面）
+	customTemplates     []CustomTemplate       // YAML 自定义响应模板
+	capturePostCallback CapturePostCallback
 }
 
 // CustomTemplate 自定义 HTTP 响应模板
@@ -46,24 +47,30 @@ func New(logger *log.Logger, st *store.Store) *Server {
 		"/api/v1/internal/users",
 		"/backup/database.sql",
 		"/debug/pprof/",
-		// Spring Boot Actuator 未授权访问
 		"/actuator/env",
 		"/actuator/heapdump",
 		"/actuator/mappings",
 		"/actuator/beans",
 		"/actuator/configprops",
-		// Swagger 未授权访问
 		"/swagger-ui.html",
 		"/swagger-ui/index.html",
 		"/v2/api-docs",
 		"/swagger-resources",
-		// Java JSP/WebShell 诱饵
 		"/shell.jsp",
 		"/cmd.jsp",
 		"/test.jsp",
-		// 其他 Java 生态
 		"/druid/index.html",
 		"/phpmyadmin/index.php",
+		"/nacos/v1/auth/login",
+		"/nacos/v1/cs/configs",
+		"/consul/v1/agent/services",
+		"/kibana/app/home",
+		"/grafana/login",
+		"/jenkins/script",
+		"/solr/admin/cores",
+		"/.env",
+		"/.DS_Store",
+		"/config/application.yml",
 	}
 	fpJS := buildFingerprintJS()
 	return &Server{
@@ -73,6 +80,9 @@ func New(logger *log.Logger, st *store.Store) *Server {
 		fingerprintJS: fpJS,
 	}
 }
+
+// CapturePostCallback POST 请求体捕获回调 — 用于记录登录凭据等敏感数据
+type CapturePostCallback func(remoteIP, path, contentType, body string)
 
 // BreadcrumbCallback 面包屑触发回调
 type BreadcrumbCallback func(remoteIP, path, userAgent string)
@@ -118,13 +128,53 @@ func (s *Server) Handle(conn net.Conn, onBreadcrumb BreadcrumbCallback) {
 			return
 		}
 
+		// 读取 POST/PUT 请求体（捕获登录凭据等）
+		var postBody string
+		if method == "POST" || method == "PUT" || method == "PATCH" {
+			cl := headers.Get("Content-Length")
+			if cl != "" {
+				clen := 0
+				fmt.Sscanf(cl, "%d", &clen)
+				if clen > 0 && clen < 65536 { // 限制 64KB
+					bodyBytes := make([]byte, clen)
+					n, _ := reader.Read(bodyBytes)
+					if n > 0 {
+						postBody = string(bodyBytes[:n])
+						s.logger.Infow("http post body captured",
+							"remote", remote,
+							"method", method,
+							"path", path,
+							"content_type", headers.Get("Content-Type"),
+							"body_len", n,
+						)
+						if s.store != nil {
+							s.store.RecordPostBody(remote, path, headers.Get("Content-Type"), postBody)
+						}
+						if s.capturePostCallback != nil {
+							s.capturePostCallback(remote, path, headers.Get("Content-Type"), postBody)
+						}
+					}
+				}
+			}
+		}
+
 		ua := headers.Get("User-Agent")
-		s.logger.Infow("http request",
-			"remote", remote,
-			"method", method,
-			"path", path,
-			"user-agent", ua,
-		)
+		if postBody != "" {
+			s.logger.Infow("http request",
+				"remote", remote,
+				"method", method,
+				"path", path,
+				"user-agent", ua,
+				"post_body_len", len(postBody),
+			)
+		} else {
+			s.logger.Infow("http request",
+				"remote", remote,
+				"method", method,
+				"path", path,
+				"user-agent", ua,
+			)
+		}
 
 		// 补录 UA 到连接记录（TCP 层记录时 UA 尚未解析）
 		if s.store != nil && ua != "" {
@@ -176,6 +226,11 @@ func (s *Server) SetCountermeasureCallback(fn CountermeasureCallback) {
 // SetDecoyPageCallback 设置诱饵页面回调（如冰蝎 JSP、Cobalt Strike 反制页面）
 func (s *Server) SetDecoyPageCallback(fn DecoyPageCallback) {
 	s.decoyPageCB = fn
+}
+
+// SetCapturePostCallback 设置 POST 请求体捕获回调
+func (s *Server) SetCapturePostCallback(fn CapturePostCallback) {
+	s.capturePostCallback = fn
 }
 
 // handleCollectFingerprint 处理浏览器指纹采集请求。
@@ -293,7 +348,14 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 	}
 
 	if strings.Contains(path, "admin") || strings.Contains(path, "login") {
-		body = s.loginPage()
+		if method == "POST" {
+			contentType = "application/json"
+			body = `{"error":"invalid_credentials","message":"Authentication failed. Please check your username and password.","code":"AUTH_FAILED","request_id":"` + fmt.Sprintf("%x", time.Now().UnixNano()) + `"}`
+			status = 401
+			statusText = "Unauthorized"
+		} else {
+			body = s.loginPage()
+		}
 	} else if strings.Contains(path, ".jsp") || strings.Contains(path, ".do") {
 		// JSP/Java 端点 — 返回冰蝎反制诱饵（通过回调获取）
 		if s.decoyPageCB != nil {
@@ -444,16 +506,43 @@ func (s *Server) fakeRobotsTxt() string {
 
 func (s *Server) loginPage() string {
 	return `<!DOCTYPE html>
-<html>
-<head><title>Admin Login | Internal System</title></head>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign In | Enterprise Management Console</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.login-box{background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1);width:380px;max-width:90%}
+.login-box h2{text-align:center;color:#1a1a2e;margin-bottom:8px;font-size:22px}
+.login-box .subtitle{text-align:center;color:#666;font-size:13px;margin-bottom:24px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;color:#333;margin-bottom:6px;font-weight:500}
+.form-group input{width:100%;padding:10px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px;transition:border-color .3s}
+.form-group input:focus{border-color:#1890ff;outline:none;box-shadow:0 0 0 2px rgba(24,144,255,.2)}
+.btn-login{width:100%;padding:10px;background:#1890ff;color:#fff;border:none;border-radius:4px;font-size:15px;font-weight:500;cursor:pointer;transition:background .3s}
+.btn-login:hover{background:#40a9ff}
+.login-footer{text-align:center;margin-top:20px;font-size:12px;color:#999}
+.login-footer a{color:#1890ff;text-decoration:none}
+.error-msg{background:#fff2f0;border:1px solid #ffccc7;color:#cf1322;padding:8px 12px;border-radius:4px;font-size:13px;margin-bottom:16px;display:none}
+</style>
+</head>
 <body>
-<h1>Administrator Login</h1>
-<form method="POST" action="/admin/login">
-  <input type="text" name="username" placeholder="Username" />
-  <input type="password" name="password" placeholder="Password" />
-  <button type="submit">Login</button>
+<div class="login-box">
+<h2>Enterprise Console</h2>
+<p class="subtitle">Internal Management System v3.2.1</p>
+<div class="error-msg" id="error">Invalid credentials. Please try again.</div>
+<form method="POST" action="/admin/login" onsubmit="return handleLogin()">
+<div class="form-group"><label>Username</label><input type="text" name="username" placeholder="admin" autocomplete="off" /></div>
+<div class="form-group"><label>Password</label><input type="password" name="password" placeholder="········" /></div>
+<button type="submit" class="btn-login">Sign In</button>
 </form>
-<p style="color:#999;font-size:12px;">Forgot password? Contact admin@internal.local</p>
+<div class="login-footer">Forgot password? Contact <a href="mailto:ops@internal.local">IT Support</a><br>&copy; 2024 Internal Systems. All rights reserved.</div>
+</div>
+<script>
+function handleLogin(){var e=document.getElementById("error");e.style.display="block";return false}
+</script>
 </body>
 </html>`
 }

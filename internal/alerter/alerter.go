@@ -18,9 +18,9 @@ import (
 type ChannelType string
 
 const (
-	ChannelWebhook ChannelType = "webhook"
+	ChannelWebhook  ChannelType = "webhook"
 	ChannelDingTalk ChannelType = "dingtalk"
-	ChannelFeishu  ChannelType = "feishu"
+	ChannelFeishu   ChannelType = "feishu"
 )
 
 // ChannelConfig 单个告警通道配置
@@ -34,7 +34,7 @@ type ChannelConfig struct {
 
 // AlertEvent 告警事件
 type AlertEvent struct {
-	Type      string    `json:"type"`       // connection / attack / breadcrumb / scan
+	Type      string    `json:"type"` // connection / attack / breadcrumb / scan
 	Title     string    `json:"title"`
 	RemoteIP  string    `json:"remote_ip"`
 	Service   string    `json:"service,omitempty"`
@@ -48,26 +48,62 @@ type AlertEvent struct {
 
 // Alerter 多通道告警器
 type Alerter struct {
-	logger   *zap.SugaredLogger
-	channels []ChannelConfig
-	client   *http.Client
-	mu       sync.Mutex
+	logger    *zap.SugaredLogger
+	channels  []ChannelConfig
+	client    *http.Client
+	mu        sync.Mutex
+	lastAlert map[string]time.Time // key: "type:ip" — 按事件类型+IP 去重限流
+	cooldown  time.Duration        // 同一 IP+事件类型的最小告警间隔
 }
 
 // New 创建告警器
 func New(logger *zap.SugaredLogger, channels []ChannelConfig) *Alerter {
 	return &Alerter{
-		logger:   logger,
-		channels: channels,
-		client:   &http.Client{Timeout: 10 * time.Second},
+		logger:    logger,
+		channels:  channels,
+		client:    &http.Client{Timeout: 10 * time.Second},
+		lastAlert: make(map[string]time.Time),
+		cooldown:  5 * time.Minute, // 同一 IP+事件类型 5 分钟内不重复告警
 	}
+}
+
+// SetCooldown 设置告警冷却时间
+func (a *Alerter) SetCooldown(d time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cooldown = d
+}
+
+// ShouldAlert 检查是否应该发送告警（冷却期内跳过）
+func (a *Alerter) ShouldAlert(event AlertEvent) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	key := event.Type + ":" + event.RemoteIP
+	last, exists := a.lastAlert[key]
+	if exists && time.Since(last) < a.cooldown {
+		return false
+	}
+	a.lastAlert[key] = time.Now()
+	return true
 }
 
 // Send 向所有启用的通道发送告警
 func (a *Alerter) Send(event AlertEvent) {
+	if !a.ShouldAlert(event) {
+		a.logger.Debugw("alert throttled (cooldown)", "type", event.Type, "ip", event.RemoteIP)
+		return
+	}
+
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
+
+	// 自动设置告警等级
+	if event.Level == "" {
+		event.Level = classifySeverity(event.Type)
+	}
+
 	for _, ch := range a.channels {
 		if !ch.Enabled {
 			continue
@@ -188,7 +224,7 @@ func (a *Alerter) sendFeishu(url string, event AlertEvent) {
 		{
 			"tag": "div",
 			"text": map[string]interface{}{
-				"tag":     "lark_md",
+				"tag": "lark_md",
 				"content": fmt.Sprintf("来源IP: %s\n目标服务: %s\n触发路径: %s\n时间: %s",
 					event.RemoteIP, event.Service, event.Path,
 					event.Timestamp.Format("2006-01-02 15:04:05")),
@@ -253,6 +289,22 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// classifySeverity 根据事件类型自动分级
+func classifySeverity(eventType string) string {
+	switch eventType {
+	case "breadcrumb", "countermeasure":
+		return "warn"
+	case "attack", "scan":
+		return "critical"
+	case "connection":
+		return "info"
+	case "post_body":
+		return "warn"
+	default:
+		return "info"
+	}
 }
 
 // BuildAlertEvent 从总线事件构建告警事件

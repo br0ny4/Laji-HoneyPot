@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -132,6 +133,17 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_ps_ip ON port_scan_events(remote_ip);
 	CREATE INDEX IF NOT EXISTS idx_ps_ts ON port_scan_events(timestamp);
+
+	CREATE TABLE IF NOT EXISTS post_bodies (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		remote_ip TEXT NOT NULL,
+		path TEXT DEFAULT '',
+		content_type TEXT DEFAULT '',
+		body TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_pb_ip ON post_bodies(remote_ip);
+	CREATE INDEX IF NOT EXISTS idx_pb_ts ON post_bodies(timestamp);
 	`
 	_, err := s.db.Exec(ddl)
 	return err
@@ -309,17 +321,54 @@ type TopoNode struct {
 
 // TopoEdge 拓扑图边
 type TopoEdge struct {
-	Source   string                 `json:"source"`
-	Target   string                 `json:"target"`
-	Label    string                 `json:"label"`
-	EdgeType string                 `json:"edgeType"` // attack, countermeasure
-	Data     map[string]interface{} `json:"data,omitempty"`
+	Source      string                 `json:"source"`
+	Target      string                 `json:"target"`
+	Label       string                 `json:"label"`
+	EdgeType    string                 `json:"edgeType"` // attack, countermeasure, internal
+	Tactic      string                 `json:"tactic,omitempty"`
+	TechniqueID string                 `json:"techniqueID,omitempty"`
+	Data        map[string]interface{} `json:"data,omitempty"`
+}
+
+// AttackerChain 攻击者行为链
+type AttackerChain struct {
+	IP       string           `json:"ip"`
+	Attacks  []AttackerStep   `json:"attacks"`
+	Counters []Countermeasure `json:"counters"`
+}
+
+// AttackerStep 攻击步骤
+type AttackerStep struct {
+	Service     string `json:"service"`
+	Tactic      string `json:"tactic"`
+	TechniqueID string `json:"techniqueID"`
+	Label       string `json:"label"`
+	LastTime    string `json:"lastTime"`
+}
+
+// Countermeasure 溯源反制记录
+type Countermeasure struct {
+	ToolName    string `json:"toolName"`
+	Path        string `json:"path"`
+	Tactic      string `json:"tactic"`
+	TechniqueID string `json:"techniqueID"`
+	Timestamp   string `json:"timestamp"`
 }
 
 // TopologyData 拓扑图完整数据
 type TopologyData struct {
-	Nodes []TopoNode `json:"nodes"`
-	Edges []TopoEdge `json:"edges"`
+	Nodes          []TopoNode      `json:"nodes"`
+	Edges          []TopoEdge      `json:"edges"`
+	Chains         []AttackerChain `json:"chains"`
+	TacticCoverage []TacticCover   `json:"tacticCoverage"`
+}
+
+// TacticCover ATT&CK 战术覆盖
+type TacticCover struct {
+	Tactic      string `json:"tactic"`
+	TacticCN    string `json:"tacticCN"`
+	TechniqueID string `json:"techniqueID"`
+	Count       int    `json:"count"`
 }
 
 // AttackerSummary 攻击者汇总
@@ -419,28 +468,92 @@ func (s *Store) GetDetailedStats() (*DetailedStats, error) {
 	return stats, nil
 }
 
-// GetTopologyData 生成攻击路径拓扑数据
+// mapServiceToTactic 将蜜罐服务/行为映射到 ATT&CK 战术
+func mapServiceToTactic(service, toolName string) (tactic, techniqueID, label string) {
+	switch service {
+	case "HTTP":
+		if strings.Contains(strings.ToLower(toolName), "nuclei") || strings.Contains(strings.ToLower(toolName), "scan") {
+			return "Reconnaissance", "T1595", "主动扫描"
+		}
+		if strings.Contains(strings.ToLower(toolName), "sqlmap") || strings.Contains(strings.ToLower(toolName), "sqli") {
+			return "Execution", "T1190", "漏洞利用"
+		}
+		return "Initial Access", "T1190", "Web探测"
+	case "SSH":
+		if strings.Contains(strings.ToLower(toolName), "hydra") || strings.Contains(strings.ToLower(toolName), "brute") {
+			return "Credential Access", "T1110", "暴力破解"
+		}
+		return "Initial Access", "T1021", "远程登录尝试"
+	case "MySQL", "Redis":
+		if strings.Contains(strings.ToLower(toolName), "hydra") || strings.Contains(strings.ToLower(toolName), "brute") {
+			return "Credential Access", "T1110", "暴力破解"
+		}
+		return "Initial Access", "T1190", "数据库探测"
+	case "FTP":
+		return "Initial Access", "T1190", "FTP探测"
+	case "LDAP":
+		return "Discovery", "T1087", "目录枚举"
+	case "DNS":
+		return "Reconnaissance", "T1590", "DNS探测"
+	case "SMB":
+		return "Lateral Movement", "T1021", "SMB探测"
+	case "RDP":
+		return "Initial Access", "T1021", "远程桌面探测"
+	default:
+		return "Initial Access", "T1190", "服务探测"
+	}
+}
+
+// mapBreadcrumbToTactic 将面包屑触发映射到 ATT&CK 战术
+func mapBreadcrumbToTactic(path string) (tactic, techniqueID, label string) {
+	if strings.Contains(path, "heapdump") || strings.Contains(path, "actuator") {
+		return "Collection", "T1005", "敏感信息窃取"
+	}
+	if strings.Contains(path, ".git") || strings.Contains(path, ".env") || strings.Contains(path, "backup") {
+		return "Collection", "T1005", "源代码泄露探测"
+	}
+	if strings.Contains(path, "admin") || strings.Contains(path, "login") || strings.Contains(path, "manage") {
+		return "Discovery", "T1083", "管理入口发现"
+	}
+	if strings.Contains(path, "swagger") || strings.Contains(path, "api") || strings.Contains(path, "druid") {
+		return "Discovery", "T1046", "API发现扫描"
+	}
+	if strings.Contains(path, "nacos") || strings.Contains(path, "spring") || strings.Contains(path, "config") {
+		return "Discovery", "T1083", "配置信息探测"
+	}
+	return "Discovery", "T1083", "敏感路径探测"
+}
+
+// GetTopologyData 生成攻击路径拓扑数据（含 ATT&CK 标签）
 func (s *Store) GetTopologyData() (*TopologyData, error) {
 	td := &TopologyData{
-		Nodes: make([]TopoNode, 0),
-		Edges: make([]TopoEdge, 0),
+		Nodes:          make([]TopoNode, 0),
+		Edges:          make([]TopoEdge, 0),
+		Chains:         make([]AttackerChain, 0),
+		TacticCoverage: make([]TacticCover, 0),
 	}
 
-	// 1. 攻击者节点 — 来自最近 200 条连接的独特 IP
 	conns, err := s.GetConnections(200)
 	if err != nil {
 		return nil, err
 	}
+
+	// 1. 收集攻击者 IP 与目标服务
 	ipSet := make(map[string]bool)
 	ipServices := make(map[string]map[string]bool)
+	ipLastTime := make(map[string]time.Time)
 	for _, c := range conns {
 		ipSet[c.RemoteIP] = true
 		if ipServices[c.RemoteIP] == nil {
 			ipServices[c.RemoteIP] = make(map[string]bool)
 		}
 		ipServices[c.RemoteIP][c.Service] = true
+		if c.Timestamp.After(ipLastTime[c.RemoteIP]) {
+			ipLastTime[c.RemoteIP] = c.Timestamp
+		}
 	}
 
+	// 2. 构建攻击者节点
 	for ip := range ipSet {
 		svcList := make([]string, 0)
 		for svc := range ipServices[ip] {
@@ -452,26 +565,29 @@ func (s *Store) GetTopologyData() (*TopologyData, error) {
 			Type:  "attacker",
 			IP:    ip,
 			Data: map[string]interface{}{
-				"services": svcList,
+				"services":  svcList,
+				"last_time": ipLastTime[ip].Format("15:04:05"),
 			},
 		})
 	}
 
-	// 2. 蜜罐服务节点 — 9 个协议
+	// 3. 蜜罐服务节点 — 9 个协议
 	services := []string{"HTTP", "MySQL", "Redis", "SSH", "FTP", "LDAP", "DNS", "SMB", "RDP"}
+	servicePorts := map[string]string{"HTTP": "8081", "MySQL": "3306", "Redis": "6379", "SSH": "2222", "FTP": "2121", "LDAP": "389", "DNS": "5353", "SMB": "445", "RDP": "3389"}
 	for _, svc := range services {
 		td.Nodes = append(td.Nodes, TopoNode{
 			ID:    "honeypot-" + svc,
-			Label: svc + "蜜罐",
+			Label: svc,
 			Type:  "honeypot",
 			IP:    "0.0.0.0",
 			Data: map[string]interface{}{
 				"service": svc,
+				"port":    servicePorts[svc],
 			},
 		})
 	}
 
-	// 3. 核心资产节点（虚拟）
+	// 4. 核心资产节点（虚拟）
 	coreAssets := []struct {
 		id, label string
 	}{
@@ -491,7 +607,9 @@ func (s *Store) GetTopologyData() (*TopologyData, error) {
 		})
 	}
 
-	// 4. 边 — 攻击者 ↔ 蜜罐（攻击路径）
+	// 5. 构建攻击边 — 攻击者 ↔ 蜜罐（含 ATT&CK 标签）
+	// 同时按攻击者 IP 分组构建攻击链
+	ipEdges := make(map[string][]TopoEdge) // attackerIP -> edges
 	for _, c := range conns {
 		attackerNodeID := "attacker-" + c.RemoteIP
 		honeypotNodeID := "honeypot-" + c.Service
@@ -503,19 +621,25 @@ func (s *Store) GetTopologyData() (*TopologyData, error) {
 			}
 		}
 		if !dup {
-			td.Edges = append(td.Edges, TopoEdge{
-				Source:   attackerNodeID,
-				Target:   honeypotNodeID,
-				Label:    c.Service,
-				EdgeType: "attack",
+			tactic, techniqueID, tacticLabel := mapServiceToTactic(c.Service, "")
+			edge := TopoEdge{
+				Source:      attackerNodeID,
+				Target:      honeypotNodeID,
+				Label:       c.Service,
+				EdgeType:    "attack",
+				Tactic:      tactic,
+				TechniqueID: techniqueID,
 				Data: map[string]interface{}{
-					"last_time": c.Timestamp.Format("15:04:05"),
+					"last_time":    c.Timestamp.Format("15:04:05"),
+					"tactic_label": tacticLabel,
 				},
-			})
+			}
+			td.Edges = append(td.Edges, edge)
+			ipEdges[c.RemoteIP] = append(ipEdges[c.RemoteIP], edge)
 		}
 	}
 
-	// 5. 边 — 蜜罐 ↔ 核心资产（防守路径，虚线/浅色）
+	// 6. 内部通路边 — 蜜罐 ↔ 核心资产
 	assetLinks := []struct{ source, target, label string }{
 		{"honeypot-HTTP", "asset-admin", "Web入口"},
 		{"honeypot-MySQL", "asset-core", "数据库"},
@@ -532,23 +656,108 @@ func (s *Store) GetTopologyData() (*TopologyData, error) {
 		})
 	}
 
-	// 6. 反制边 — 面包屑触发（蓝色）
+	// 7. 反制边 — 面包屑触发（含 ATT&CK 标签）
 	attacks, _ := s.GetAttacks(100)
+	ipCounters := make(map[string][]Countermeasure) // attackerIP -> counters
 	for _, a := range attacks {
+		tactic, techniqueID, tacticLabel := mapBreadcrumbToTactic(a.Path)
 		attackerNodeID := "attacker-" + a.RemoteIP
-		// 根据路径确定目标服务
-		svc := "HTTP" // 默认 HTTP
-		honeypotNodeID := "honeypot-" + svc
 		td.Edges = append(td.Edges, TopoEdge{
-			Source:   honeypotNodeID,
-			Target:   attackerNodeID,
-			Label:    a.ToolName,
-			EdgeType: "countermeasure",
+			Source:      "honeypot-HTTP",
+			Target:      attackerNodeID,
+			Label:       a.ToolName,
+			EdgeType:    "countermeasure",
+			Tactic:      tactic,
+			TechniqueID: techniqueID,
 			Data: map[string]interface{}{
-				"path":      a.Path,
-				"timestamp": a.Timestamp.Format("15:04:05"),
-				"attack_id": a.ID,
+				"path":         a.Path,
+				"timestamp":    a.Timestamp.Format("15:04:05"),
+				"attack_id":    a.ID,
+				"tactic_label": tacticLabel,
 			},
+		})
+		ipCounters[a.RemoteIP] = append(ipCounters[a.RemoteIP], Countermeasure{
+			ToolName:    a.ToolName,
+			Path:        a.Path,
+			Tactic:      tactic,
+			TechniqueID: techniqueID,
+			Timestamp:   a.Timestamp.Format("15:04:05"),
+		})
+	}
+
+	// 8. 构建攻击者行为链
+	for ip := range ipSet {
+		chain := AttackerChain{
+			IP:       ip,
+			Attacks:  make([]AttackerStep, 0),
+			Counters: make([]Countermeasure, 0),
+		}
+		for _, edge := range ipEdges[ip] {
+			tacticLabel := ""
+			if d, ok := edge.Data["tactic_label"].(string); ok {
+				tacticLabel = d
+			}
+			lastTime := ""
+			if d, ok := edge.Data["last_time"].(string); ok {
+				lastTime = d
+			}
+			chain.Attacks = append(chain.Attacks, AttackerStep{
+				Service:     edge.Label,
+				Tactic:      edge.Tactic,
+				TechniqueID: edge.TechniqueID,
+				Label:       tacticLabel,
+				LastTime:    lastTime,
+			})
+		}
+		if cs, ok := ipCounters[ip]; ok {
+			chain.Counters = cs
+		}
+		td.Chains = append(td.Chains, chain)
+	}
+
+	// 9. 构建 ATT&CK 战术覆盖统计
+	tacticSet := make(map[string]int)
+	tacticName := map[string]string{
+		"Reconnaissance":       "侦察",
+		"Initial Access":       "初始访问",
+		"Execution":            "执行",
+		"Persistence":          "持久化",
+		"Privilege Escalation": "权限提升",
+		"Defense Evasion":      "防御规避",
+		"Credential Access":    "凭证访问",
+		"Discovery":            "发现",
+		"Lateral Movement":     "横向移动",
+		"Collection":           "采集",
+		"Command and Control":  "命令与控制",
+		"Exfiltration":         "数据渗出",
+		"Impact":               "影响",
+	}
+	// 从攻击边统计
+	for _, e := range td.Edges {
+		if e.Tactic != "" {
+			tacticSet[e.Tactic]++
+		}
+	}
+	allTactics := []string{"Reconnaissance", "Initial Access", "Execution", "Persistence", "Credential Access", "Discovery", "Lateral Movement", "Collection"}
+	for _, t := range allTactics {
+		cnt := tacticSet[t]
+		cn := tacticName[t]
+		if cn == "" {
+			cn = t
+		}
+		// 取一个代表性 techniqueID
+		tid := ""
+		for _, e := range td.Edges {
+			if e.Tactic == t && e.TechniqueID != "" {
+				tid = e.TechniqueID
+				break
+			}
+		}
+		td.TacticCoverage = append(td.TacticCoverage, TacticCover{
+			Tactic:      t,
+			TacticCN:    cn,
+			TechniqueID: tid,
+			Count:       cnt,
 		})
 	}
 
@@ -616,6 +825,18 @@ func (s *Store) RecordCountermeasure(remoteIP, triggerPath, payloadType, payload
 		`INSERT INTO countermeasure_events (remote_ip, trigger_path, payload_type, payload_preview, user_agent, related_attack_id)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		remoteIP, triggerPath, payloadType, payloadPreview, userAgent, relatedAttackID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// RecordPostBody 记录 POST 请求体（捕获登录凭据等敏感数据）
+func (s *Store) RecordPostBody(remoteIP, path, contentType, body string) (int64, error) {
+	res, err := s.db.Exec(
+		"INSERT INTO post_bodies (remote_ip, path, content_type, body) VALUES (?, ?, ?, ?)",
+		remoteIP, path, contentType, body,
 	)
 	if err != nil {
 		return 0, err
