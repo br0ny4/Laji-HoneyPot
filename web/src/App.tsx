@@ -6,6 +6,7 @@ import FingerprintPanel from './components/FingerprintPanel';
 import CountermeasurePanel from './components/CountermeasurePanel';
 import AssetLedger from './components/AssetLedger';
 import OpsPanel from './components/OpsPanel';
+import StatusBar from './components/StatusBar';
 import './App.css';
 
 type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'ops';
@@ -64,6 +65,8 @@ export default function App() {
         {activeTab === 'assets' && <AssetLedger />}
         {activeTab === 'ops' && <OpsPanel />}
       </main>
+
+      <StatusBar />
     </div>
   );
 }

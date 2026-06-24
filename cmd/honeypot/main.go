@@ -60,6 +60,7 @@ func main() {
 		logger.Errorw("failed to start plugins", "error", err)
 		os.Exit(1)
 	}
+	logger.Infow("plugins started", "count", len(reg.List()), "plugins", reg.List())
 
 	// 面包屑触发 → 反制 Payload 注入链路：溯源引擎根据攻击上下文智能选择最优载荷
 	hpEngine.SetCountermeasureProvider(func(path, userAgent, remoteIP string) string {

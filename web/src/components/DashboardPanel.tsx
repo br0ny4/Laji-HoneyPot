@@ -59,6 +59,7 @@ export default function DashboardPanel() {
     let es: EventSource | null = null;
     try {
       es = new EventSource('/api/events');
+      es.onopen = () => window.dispatchEvent(new Event('sse-open'));
       es.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
@@ -68,7 +69,7 @@ export default function DashboardPanel() {
         } catch { /* 忽略解析错误 */ }
       };
       es.onerror = () => {
-        console.warn('[Dashboard] SSE 连接中断，将重连...');
+        window.dispatchEvent(new Event('sse-error'));
       };
     } catch (err) {
       console.warn('[Dashboard] SSE 初始化失败:', err);

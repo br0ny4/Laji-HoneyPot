@@ -191,29 +191,39 @@ docker compose up -d
 
 Laji-HoneyPot 提供 React 18 可视化后台管理系统，支持实时监控蜜罐状态、查看攻击事件与反制日志、拓扑图可视化等。
 
-### 启动前端
+### 启动方式
+
+**推荐（生产模式）：Go 后端直接托管前端**
 
 ```bash
-cd web
+# 1. 构建前端产物
+cd web && npm install && npm run build && cd ..
 
-# 安装依赖（仅首次）
-npm install
+# 2. 启动后端（自动检测 web/dist/ 并托管静态文件）
+go run ./cmd/honeypot
 
-# 开发模式启动（默认 http://localhost:3000）
-npm run dev
+# 3. 浏览器打开 http://127.0.0.1:8080
+```
 
-# 生产构建（输出到 web/dist/）
-npm run build
+**开发模式：前后端分离运行**
+
+```bash
+# 终端 1：后端
+go run ./cmd/honeypot
+
+# 终端 2：前端开发服务器（Vite HMR，仅绑定 127.0.0.1）
+cd web && npm run dev
+# 浏览器打开 http://127.0.0.1:3000
 ```
 
 ### 访问后台
 
 | 项目 | 地址 |
 |------|------|
-| 管理后台 | `http://localhost:3000`（开发模式） |
-| API 接口 | `http://127.0.0.1:8080` |
+| 生产模式（推荐） | `http://127.0.0.1:8080` |
+| 开发模式（Vite HMR） | `http://127.0.0.1:3000` |
 
-> **安全设计**: API 仅绑定 `127.0.0.1`，不对外暴露。前端通过 Vite 开发代理转发 API 请求，生产环境需配合反向代理（如 nginx）或静态文件嵌入。
+> **重要**: 生产环境请使用第一种方式（`npm run build` + Go 托管）。开发模式 Vite 开发服务器不应暴露到公网，否则可能被扫描流量压垮。
 
 ### API 认证
 

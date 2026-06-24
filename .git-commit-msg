@@ -1,18 +1,19 @@
-fix: 前端无日志显示 + 3000端口被扫关闭问题修复
+feat: 前后端日志系统 — 请求追踪+状态栏调试面板
 
-问题根因：
-1. Vite proxy 使用 localhost (可能解析为IPv6 ::1)，而API绑定 127.0.0.1 (纯IPv4)，导致跨协议连接失败
-2. 前端所有组件 .catch(() => {}) 静默吞错，用户完全看不到失败原因
-3. Vite 开发服务器暴露到公网被扫描，导致3000端口进程崩溃
-4. 缺少生产模式前端托管方案
+后端:
+- 新增 requestLogMiddleware 请求日志中间件，记录 method/path/status/duration/remote
+- 新增 responseWriter wrapper 捕获写入状态码
+- main.go 启动流程补充 plugins started 里程碑日志
 
-修复内容：
-- vite.config.ts: proxy target 改为 http://127.0.0.1:8080，host 绑定 127.0.0.1
-- DashboardPanel: 新增错误横幅+排查步骤提示，.catch 改为可见错误状态
-- AttackPanel/FingerprintPanel/CountermeasurePanel/AssetLedger/TopologyGraph:
-  所有 .catch(() => {}) 替换为 console.error 含组件标识+HTTP状态码检查
-- Go API 服务器新增前端静态文件托管（cmd/honeypot/frontend.go）:
-  自动检测 web/dist/ 目录，无需单独运行 Vite 开发服务器
-- server.go: 新增 frontendHandler 字段+SetFrontendHandler 方法+SPA路由
-- OpsPanel: 部署指南更新为先构建前端再启动后端的一步式流程
-- README: 新增生产模式/开发模式两种部署说明，强调安全使用
+前端:
+- api.ts 重构: 新增 LogEntry 类型、onLog() 订阅、emitLog() 发射
+- apiFetch 自动记录每次请求的 status+耗时 (GET /api/stats → 200 (3ms))
+- 新增 StatusBar 组件 — 页面底部固定调试栏:
+  - API 连接状态指示灯 (绿/红/灰) + 自动 /healthz 探测
+  - SSE 连接状态指示灯 + DashboardPanel 的 EventSource 状态同步
+  - 可展开日志面板 (最近50条，最近错误高亮)
+  - 错误/警告/信息三级计数徽章
+- DashboardPanel: EventSource onopen/onerror 通过 window 事件同步 SSE 状态
+- App.css: 完整 StatusBar 样式 (fixed bottom bar, dark theme, 日志行 hover)
+
+用户可通过底部状态栏一眼判断: API 通不通、SSE 连没连、最近什么错误。

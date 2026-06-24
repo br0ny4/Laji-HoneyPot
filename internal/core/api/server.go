@@ -92,9 +92,9 @@ func (s *Server) registerRoutes() {
 }
 
 // Handler 返回带安全中间件链的 http.Handler
-// 链式顺序: CORS白名单 → API Key认证 → 速率限制
+// 链式顺序: 请求日志 → CORS白名单 → API Key认证 → 速率限制
 func (s *Server) Handler() http.Handler {
-	return corsMiddleware(s.apiKeyMiddleware(rateLimitMiddleware(s.mux)))
+	return requestLogMiddleware(s.logger, corsMiddleware(s.apiKeyMiddleware(rateLimitMiddleware(s.mux))))
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -435,6 +435,34 @@ func queryInt(r *http.Request, key string, defaultVal int) int {
 		return 1000
 	}
 	return n
+}
+
+// requestLogMiddleware 记录每个 HTTP 请求的方法、路径、状态码和耗时
+func requestLogMiddleware(logger *log.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		duration := time.Since(start)
+		logger.Infow("http",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rw.statusCode,
+			"duration_ms", duration.Milliseconds(),
+			"remote", r.RemoteAddr,
+		)
+	})
+}
+
+// responseWriter 包装 http.ResponseWriter，捕获写入的状态码
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 // rateLimiter 基于 IP 的简易令牌桶速率限制，默认 100 req/s
