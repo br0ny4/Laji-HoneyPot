@@ -1,10 +1,6 @@
 # Laji-HoneyPot（辣鸡蜜罐）
 
 <p align="center">
-  <img src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=A%20stylized%20cartoon%20honey%20pot%20with%20a%20slightly%20aggressive%20expression%2C%20wearing%20a%20tiny%20cybersecurity%20shield%20badge%2C%20glowing%20amber%20honey%20dripping%20over%20the%20rim%2C%20surrounded%20by%20digital%20network%20lines%20and%20small%20cartoon%20flies%20getting%20stuck%20in%20the%20honey%2C%20flat%20vector%20style%2C%20dark%20tech%20background" width="180" alt="Laji-HoneyPot logo" />
-</p>
-
-<p align="center">
   <b>面向网络安全攻防场景中防守方<em>溯源反制</em>环节的高性能蜜罐系统</b>
 </p>
 
@@ -375,6 +371,15 @@ Laji-HoneyPot/
   </a>
   <a href="https://github.com/hacklcx" title="hacklcx — HFish 项目作者，竞品参考与启发">
     <img src="https://github.com/hacklcx.png" width="64" height="64" style="border-radius:50%;margin:4px" alt="hacklcx" />
+  </a>
+  <a href="https://github.com/storyxie" title="storyxie — 贡献者">
+    <img src="https://github.com/storyxie.png" width="64" height="64" style="border-radius:50%;margin:4px" alt="storyxie" />
+  </a>
+  <a href="https://github.com/lenawook313-sketch" title="lenawook313-sketch — 贡献者">
+    <img src="https://github.com/lenawook313-sketch.png" width="64" height="64" style="border-radius:50%;margin:4px" alt="lenawook313-sketch" />
+  </a>
+  <a href="https://github.com/laohuan12138" title="laohuan12138 — 贡献者">
+    <img src="https://github.com/laohuan12138.png" width="64" height="64" style="border-radius:50%;margin:4px" alt="laohuan12138" />
   </a>
 </p>
 

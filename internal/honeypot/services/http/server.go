@@ -2,10 +2,12 @@ package http
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/textproto"
+	"net/url"
 	"strings"
 	"time"
 
@@ -256,16 +258,32 @@ func (s *Server) handleCollectFingerprint(conn net.Conn, remote, path, _, ua str
 		return
 	}
 
+	// URL 解码 — JS 端使用 encodeURIComponent 编码，必须解码后才能正确入库
+	decoded, err := url.QueryUnescape(rawData)
+	if err != nil {
+		decoded = rawData // 解码失败保留原始数据
+	}
+
 	host, _, _ := net.SplitHostPort(remote)
 
-	// 生成 tracking ID（从请求头中读取 Cookie 或新建）
-	trackingID := "hp-" + fmt.Sprintf("%x", time.Now().UnixNano())[:8]
+	// 尝试从 JSON 数据中提取追踪 ID（反制载荷会带 tid 字段）
+	trackingID := ""
+	var fpData map[string]interface{}
+	if json.Unmarshal([]byte(decoded), &fpData) == nil {
+		if tid, ok := fpData["tid"].(string); ok && tid != "" {
+			trackingID = tid
+		}
+	}
+	if trackingID == "" {
+		trackingID = "hp-" + fmt.Sprintf("%x", time.Now().UnixNano())[:8]
+	}
 
 	if s.store != nil {
-		s.store.RecordFingerprint(trackingID, host, ua, rawData)
+		s.store.RecordFingerprint(trackingID, host, ua, decoded)
 		s.logger.Infow("fingerprint collected via honeypot",
 			"remote", remote,
-			"data_len", len(rawData),
+			"tracking_id", trackingID,
+			"data_len", len(decoded),
 		)
 	}
 

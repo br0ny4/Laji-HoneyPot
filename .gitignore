@@ -1,6 +1,7 @@
 # Binaries
 /honeypot
 /honeypot-*
+/bin/
 *.exe
 *.dll
 *.so
