@@ -45,13 +45,19 @@ export default function CountermeasurePanel() {
 
   const fetchData = () => {
     apiFetch(`/api/countermeasures?limit=${limit}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d) => setCms(d.countermeasures || []))
-      .catch(() => {});
+      .catch((err) => console.error('[CountermeasurePanel] 获取反制日志失败:', err));
     apiFetch('/api/countermeasures/stats')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d) => setStats(d))
-      .catch(() => {});
+      .catch((err) => console.error('[CountermeasurePanel] 获取反制统计失败:', err));
   };
 
   useEffect(() => {

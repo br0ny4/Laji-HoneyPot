@@ -273,7 +273,6 @@ Laji-HoneyPot/
 │   ├── plugin/                # 插件接口契约
 │   ├── honeypot/              # 蜜罐引擎
 │   │   ├── tcpstack/          # 自研 TCP 协议栈
-│   │   ├── tls/               # TLS 指纹伪装
 │   │   ├── services/          # 服务仿真（HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP）
 │   │   └── manager/           # 容器安全管理
 │   ├── traceability/          # 溯源反制引擎
@@ -309,7 +308,7 @@ Laji-HoneyPot/
 
 - [x] 微内核架构（注册中心、事件总线、配置、日志）
 - [x] HTTP/MySQL/Redis/SSH 四大蜜罐服务
-- [x] TLS 指纹伪装（nginx/apache/openssh）
+- [x] 被动 TLS ClientHello 检测（SNI/密码套件/版本）
 - [x] 面包屑引流机制
 - [x] 漏洞数据库（红队工具 + 浏览器漏洞）
 - [x] 攻击者指纹采集（工具识别 + 浏览器识别）

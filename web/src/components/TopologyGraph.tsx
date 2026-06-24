@@ -57,10 +57,11 @@ export default function TopologyGraph() {
   const fetchTopology = useCallback(async () => {
     try {
       const res = await apiFetch('/api/topology');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: TopologyData = await res.json();
       setTopoData(data);
-    } catch {
-      // keep stale data
+    } catch(err) {
+      console.error('[TopologyGraph] 获取拓扑失败:', err);
     } finally {
       setLoading(false);
     }

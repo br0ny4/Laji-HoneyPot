@@ -17,9 +17,12 @@ export default function FingerprintPanel() {
 
   const fetchFps = () => {
     apiFetch(`/api/fingerprints?limit=${limit}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d) => setFps(d.fingerprints || []))
-      .catch(() => {});
+      .catch((err) => console.error('[FingerprintPanel] 获取指纹失败:', err));
   };
 
   useEffect(() => {

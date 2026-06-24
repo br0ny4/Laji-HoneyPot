@@ -18,9 +18,12 @@ export default function AssetLedger() {
 
   useEffect(() => {
     apiFetch('/api/attackers?limit=100')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d) => setAttackers(d.attackers || []))
-      .catch(() => {});
+      .catch((err) => console.error('[AssetLedger] 获取攻击者列表失败:', err));
   }, []);
 
   const getRiskLevel = (a: AttackerSummary): string => {

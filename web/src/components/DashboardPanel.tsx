@@ -24,42 +24,84 @@ interface Connection {
 export default function DashboardPanel() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [conns, setConns] = useState<Connection[]>([]);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const fetchData = () => {
     apiFetch('/api/stats/detailed')
-      .then((r) => r.json())
-      .then(setStats)
-      .catch(() => {});
+      .then((r) => {
+        if (!r.ok) throw new Error(`API 返回 ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        setStats(data as Stats);
+        setError('');
+      })
+      .catch((err) => {
+        console.error('[Dashboard] 获取统计失败:', err);
+        setError(`无法连接到后端 API (${err.message})。请确认 honeypot 已启动且 API 端口 8080 可访问。`);
+      });
 
     apiFetch('/api/connections?limit=10')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`API 返回 ${r.status}`);
+        return r.json();
+      })
       .then((d) => setConns(d.connections || []))
-      .catch(() => {});
+      .catch((err) => console.error('[Dashboard] 获取连接列表失败:', err));
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
-  // SSE 实时更新（/api/events 已豁免认证，无需 api_key）
+  // SSE 实时更新
   useEffect(() => {
-    const es = new EventSource('/api/events');
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'stats') {
-          apiFetch('/api/stats/detailed')
-            .then((r) => r.json())
-            .then(setStats)
-            .catch(() => {});
-          apiFetch('/api/connections?limit=10')
-            .then((r) => r.json())
-            .then((d) => setConns(d.connections || []))
-            .catch(() => {});
-        }
-      } catch { /* ignore */ }
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/events');
+      es.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'stats') {
+            fetchData();
+          }
+        } catch { /* 忽略解析错误 */ }
+      };
+      es.onerror = () => {
+        console.warn('[Dashboard] SSE 连接中断，将重连...');
+      };
+    } catch (err) {
+      console.warn('[Dashboard] SSE 初始化失败:', err);
+    }
+    return () => {
+      if (es) es.close();
     };
-    return () => es.close();
   }, []);
+
+  // 错误状态
+  if (error) {
+    return (
+      <div className="dashboard-panel">
+        <div className="error-banner">
+          <div className="error-icon">&#9888;</div>
+          <div className="error-message">{error}</div>
+          <button className="btn-refresh" onClick={fetchData}>重试</button>
+        </div>
+        <div className="error-hint">
+          <h4>排查步骤：</h4>
+          <ol>
+            <li>确认后端已启动：<code>go run ./cmd/honeypot</code></li>
+            <li>确认 API 监听地址为 <code>127.0.0.1:8080</code>（见 <code>config.yaml</code>）</li>
+            <li>若使用 Vite 开发服务器，确认 proxy 配置指向 <code>http://127.0.0.1:8080</code></li>
+            <li>生产环境请使用 <code>npm run build</code> 构建后由 Go 后端直接托管前端</li>
+          </ol>
+        </div>
+      </div>
+    );
+  }
 
   if (!stats) {
-    return <div className="loading">加载中...</div>;
+    return <div className="loading">正在连接后端 API...</div>;
   }
 
   return (
@@ -109,6 +151,9 @@ export default function DashboardPanel() {
                 <span className="service-bar-count">{cnt}</span>
               </div>
             ))}
+            {Object.keys(stats.by_service || {}).length === 0 && (
+              <div className="empty-hint">暂无连接数据</div>
+            )}
           </div>
         </div>
 
@@ -162,7 +207,7 @@ export default function DashboardPanel() {
               </tr>
             ))}
             {conns.length === 0 && (
-              <tr><td colSpan={5} className="empty-hint">暂无数据</td></tr>
+              <tr><td colSpan={5} className="empty-hint">暂无数据 — 等待攻击者连接</td></tr>
             )}
           </tbody>
         </table>

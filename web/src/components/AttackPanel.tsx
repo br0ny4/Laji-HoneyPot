@@ -17,9 +17,12 @@ export default function AttackPanel() {
 
   const fetchAttacks = () => {
     apiFetch(`/api/attacks?limit=${limit}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d) => setAttacks(d.attacks || []))
-      .catch(() => {});
+      .catch((err) => console.error('[AttackPanel] 获取攻击事件失败:', err));
   };
 
   useEffect(() => {

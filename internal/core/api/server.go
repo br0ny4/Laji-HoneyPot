@@ -19,13 +19,14 @@ import (
 
 // Server HTTP API 服务器
 type Server struct {
-	logger    *log.Logger
-	store     *store.Store
-	vulnDB    *vulndb.DB
-	wsHub     *WSHub
-	mux       *http.ServeMux
-	apiKey    string // 管理后台认证密钥，空则不启用
-	startTime time.Time
+	logger          *log.Logger
+	store           *store.Store
+	vulnDB          *vulndb.DB
+	wsHub           *WSHub
+	mux             *http.ServeMux
+	apiKey          string // 管理后台认证密钥，空则不启用
+	startTime       time.Time
+	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
 }
 
 // NewServer 创建 API 服务器
@@ -41,6 +42,11 @@ func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, 
 	}
 	s.registerRoutes()
 	return s
+}
+
+// SetFrontendHandler 设置前端静态文件 handler（由 go:embed 提供）
+func (s *Server) SetFrontendHandler(h http.Handler) {
+	s.frontendHandler = h
 }
 
 func (s *Server) registerRoutes() {
@@ -74,6 +80,15 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/events", s.wsHub.ServeWS)
 	// 浏览器指纹采集
 	s.mux.HandleFunc("/api/collect", s.handleCollect)
+
+	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if s.frontendHandler != nil {
+			s.frontendHandler.ServeHTTP(w, r)
+		} else {
+			http.Error(w, "前端未构建。请运行: cd web && npm run build", http.StatusNotFound)
+		}
+	})
 }
 
 // Handler 返回带安全中间件链的 http.Handler

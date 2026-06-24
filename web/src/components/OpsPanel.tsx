@@ -77,29 +77,29 @@ export default function OpsPanel() {
             <div className="ops-step">
               <span className="ops-step-num">1</span>
               <div>
-                <strong>启动后端</strong>
-                <code className="ops-code">go run ./cmd/honeypot</code>
+                <strong>构建前端</strong>
+                <code className="ops-code">cd web && npm install && npm run build</code>
               </div>
             </div>
             <div className="ops-step">
               <span className="ops-step-num">2</span>
               <div>
-                <strong>启动前端</strong>
-                <code className="ops-code">cd web && npm run dev</code>
+                <strong>启动后端（自动托管前端）</strong>
+                <code className="ops-code">go run ./cmd/honeypot</code>
               </div>
             </div>
             <div className="ops-step">
               <span className="ops-step-num">3</span>
               <div>
                 <strong>访问管理端</strong>
-                <code className="ops-code">http://localhost:3000</code>
+                <code className="ops-code">http://127.0.0.1:8080</code>
               </div>
             </div>
             <div className="ops-step">
               <span className="ops-step-num">4</span>
               <div>
-                <strong>构建生产版本</strong>
-                <code className="ops-code">cd web && npm run build</code>
+                <strong>开发模式（可选）</strong>
+                <code className="ops-code">cd web && npm run dev</code>
               </div>
             </div>
           </div>

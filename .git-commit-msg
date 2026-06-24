@@ -1,0 +1,18 @@
+fix: 前端无日志显示 + 3000端口被扫关闭问题修复
+
+问题根因：
+1. Vite proxy 使用 localhost (可能解析为IPv6 ::1)，而API绑定 127.0.0.1 (纯IPv4)，导致跨协议连接失败
+2. 前端所有组件 .catch(() => {}) 静默吞错，用户完全看不到失败原因
+3. Vite 开发服务器暴露到公网被扫描，导致3000端口进程崩溃
+4. 缺少生产模式前端托管方案
+
+修复内容：
+- vite.config.ts: proxy target 改为 http://127.0.0.1:8080，host 绑定 127.0.0.1
+- DashboardPanel: 新增错误横幅+排查步骤提示，.catch 改为可见错误状态
+- AttackPanel/FingerprintPanel/CountermeasurePanel/AssetLedger/TopologyGraph:
+  所有 .catch(() => {}) 替换为 console.error 含组件标识+HTTP状态码检查
+- Go API 服务器新增前端静态文件托管（cmd/honeypot/frontend.go）:
+  自动检测 web/dist/ 目录，无需单独运行 Vite 开发服务器
+- server.go: 新增 frontendHandler 字段+SetFrontendHandler 方法+SPA路由
+- OpsPanel: 部署指南更新为先构建前端再启动后端的一步式流程
+- README: 新增生产模式/开发模式两种部署说明，强调安全使用

@@ -114,6 +114,15 @@ func main() {
 	}
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, cfg.APIKey)
+
+	// 前端 SPA 静态文件服务（从 web/dist/ 或 web/ 目录加载）
+	if fh := getFrontendFS("."); fh != nil {
+		apiSrv.SetFrontendHandler(http.FileServer(fh))
+		logger.Info("frontend serving static files")
+	} else {
+		logger.Warn("frontend not found — run: cd web && npm run build")
+	}
+
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
 		Handler: apiSrv.Handler(),
