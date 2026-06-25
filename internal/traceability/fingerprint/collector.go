@@ -9,7 +9,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
-// AttackerFingerprint 攻击者综合指纹
+// AttackerFingerprint 攻击者综合指纹（多维度浏览器+设备+网络+行为）
 type AttackerFingerprint struct {
 	IP        string    `json:"ip"`
 	Port      int       `json:"port"`
@@ -34,13 +34,43 @@ type AttackerFingerprint struct {
 	ToolName    string `json:"tool_name,omitempty"`
 	ToolVersion string `json:"tool_version,omitempty"`
 
-	CanvasHash  string   `json:"canvas_hash,omitempty"`
-	WebGLVendor string   `json:"webgl_vendor,omitempty"`
-	ScreenRes   string   `json:"screen_res,omitempty"`
-	Timezone    string   `json:"timezone,omitempty"`
-	Languages   []string `json:"languages,omitempty"`
-	InnerIP     string   `json:"inner_ip,omitempty"` // WebRTC 内网 IP
-	BrowserName string   `json:"browser_name,omitempty"`
+	// 浏览器被动指纹
+	CanvasHash    string   `json:"canvas_hash,omitempty"`
+	WebGLVendor   string   `json:"webgl_vendor,omitempty"`
+	WebGLRenderer string   `json:"webgl_renderer,omitempty"`
+	ScreenRes     string   `json:"screen_res,omitempty"`
+	ColorDepth    int      `json:"color_depth,omitempty"`
+	Timezone      string   `json:"timezone,omitempty"`
+	Languages     []string `json:"languages,omitempty"`
+	InnerIP       string   `json:"inner_ip,omitempty"` // WebRTC 内网 IP
+	BrowserName   string   `json:"browser_name,omitempty"`
+
+	// 扩展设备指纹
+	HardwareConcurrency int    `json:"hardware_concurrency,omitempty"` // CPU 核心数
+	DeviceMemory        int    `json:"device_memory,omitempty"`        // 设备内存(GB)
+	Platform            string `json:"platform,omitempty"`             // 操作系统架构
+	ConnectionType      string `json:"connection_type,omitempty"`      // 网络类型 (4g/wifi/ethernet)
+	TouchSupport        bool   `json:"touch_support,omitempty"`        // 是否触屏设备
+	MaxTouchPoints      int    `json:"max_touch_points,omitempty"`     // 最大触控点数
+	AudioHash           string `json:"audio_hash,omitempty"`           // AudioContext 指纹
+	MathPrecision       string `json:"math_precision,omitempty"`       // 数学精度指纹
+	DoNotTrack          string `json:"do_not_track,omitempty"`         // DNT 状态
+	AdBlocker           bool   `json:"ad_blocker,omitempty"`           // 广告拦截器检测
+	CookieEnabled       bool   `json:"cookie_enabled,omitempty"`       // Cookie 启用状态
+	FontFingerprint     string `json:"font_fingerprint,omitempty"`     // 字体指纹哈希
+
+	// 网络信息
+	PublicIP  string   `json:"public_ip,omitempty"`  // 攻击者真实公网 IP
+	WebRTCIPs []string `json:"webrtc_ips,omitempty"` // WebRTC 暴露的全部 IP
+	Referrer  string   `json:"referrer,omitempty"`   // HTTP Referer 来源
+
+	// 行为轨迹
+	VisitCount    int      `json:"visit_count,omitempty"`    // 页面访问次数
+	PageSequence  []string `json:"page_sequence,omitempty"`  // 页面浏览路径序列
+	TotalStayMS   int64    `json:"total_stay_ms,omitempty"`  // 累计停留时长(毫秒)
+	ScrollDepth   int      `json:"scroll_depth,omitempty"`   // 最大滚动深度(px)
+	ClickCount    int      `json:"click_count,omitempty"`    // 点击次数
+	BreadcrumbHit int      `json:"breadcrumb_hit,omitempty"` // 触发面包屑次数
 
 	SocialAccounts []string `json:"social_accounts,omitempty"`
 }

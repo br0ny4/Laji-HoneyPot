@@ -269,44 +269,130 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 	return e.enhancedFingerprintPayload()
 }
 
-// chromePayload Chrome 浏览器专项反制 — 硬件指纹 + 社工下载诱饵
+// chromePayload Chrome 浏览器专项反制 — 全维度硬件指纹 + 网络拓扑探测
+// 安全：仅使用被动采集 API，无 eval/弹窗/自动下载，try/catch 全包裹
 func (e *Engine) chromePayload() string {
 	return fmt.Sprintf(`<script>
-// Laji-HoneyPot 反制 / Chrome 专项
 (function(){
 var d={t:'chrome_exploit',ts:Date.now(),ua:navigator.userAgent,
-  plat:navigator.platform,hw:navigator.hardwareConcurrency,
-  mem:navigator.deviceMemory||'unknown',conn:navigator.connection?navigator.connection.effectiveType:'unknown',
-  scr:screen.width+'x'+screen.height,tz:Intl.DateTimeFormat().resolvedOptions().timeZone,
+  plat:navigator.platform,arch:navigator.userAgentData?navigator.userAgentData.platform:'',
+  hw:navigator.hardwareConcurrency,mem:navigator.deviceMemory||'',
+  dpr:window.devicePixelRatio||1,touch:('ontouchstart' in window),
+  scr:screen.width+'x'+screen.height,cd:screen.colorDepth,
+  tz:Intl.DateTimeFormat().resolvedOptions().timeZone,
   lang:navigator.language};
-try{var g=document.createElement('canvas').getContext('webgl');
-d.gpu=g.getParameter(g.RENDERER)}catch(e){}
-try{navigator.getBattery().then(function(b){d.bat=Math.round(b.level*100)+'%%:'+b.charging})}catch(e){}
-try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});
-r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];
-if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};
-setTimeout(function(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))},1500)}catch(e){
-new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}
-var a=document.createElement('a');a.href='/api/collect?dl='+encodeURIComponent(JSON.stringify(d));
-a.download='session_info.json';document.body.appendChild(a);a.click();
-})();
-</script>`)
+
+try{d.langs=navigator.languages}catch(e){}
+try{d.conn=navigator.connection.effectiveType;d.rtt=navigator.connection.rtt;d.down=navigator.connection.downlink}catch(e){}
+try{d.maxTouch=navigator.maxTouchPoints||0}catch(e){}
+
+// WebGL 深度采集
+try{
+  var gl=document.createElement('canvas').getContext('webgl');
+  if(gl){
+    d.gpu_vendor=gl.getParameter(gl.VENDOR);d.gpu_renderer=gl.getParameter(gl.RENDERER);
+    var ext=gl.getSupportedExtensions();if(ext)d.gpu_ext=ext.slice(0,30).join(',');
+    var dbg=gl.getExtension('WEBGL_debug_renderer_info');
+    if(dbg){d.gpu_umvendor=gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);d.gpu_umrenderer=gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)}
+  }
+}catch(e){}
+
+// OfflineAudioContext 指纹（无自动播放限制）
+try{
+  var ac=new(window.OfflineAudioContext||window.webkitOfflineAudioContext)(1,44100,44100);
+  var osc=ac.createOscillator();osc.type='triangle';osc.frequency.value=10000;
+  var an=ac.createAnalyser(),gn=ac.createGain();gn.gain.value=0;
+  osc.connect(an);an.connect(gn);gn.connect(ac.destination);osc.start(0);
+  ac.startRendering().then(function(b){var s=new Float32Array(b.length),sum=0;
+  b.copyFromChannel(s,0);for(var i=0;i<1000;i++)sum+=Math.abs(s[i]);
+  d.ac=Math.round(sum);new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})
+}catch(e){report()}
+
+// 字体指纹
+try{
+  var fs=['monospace','sans-serif','serif','Arial','Courier New','Times New Roman','Verdana','Georgia'],bf='';
+  for(var i=0;i<fs.length;i++){var m=document.createElement('span');m.style.fontFamily=fs[i];
+  m.style.fontSize='64px';m.textContent='mmmmmmmmmml';document.body.appendChild(m);
+  bf+=m.offsetWidth+',';document.body.removeChild(m)}d.fonts=bf
+}catch(e){}
+
+// 广告拦截器检测
+try{var ba=document.createElement('div');ba.className='adsbox';ba.style.cssText='position:absolute;left:-9999px;width:1px;height:1px';document.body.appendChild(ba);setTimeout(function(){d.adblock=ba.offsetHeight===0;document.body.removeChild(ba);report()},200)}catch(e){report()}
+
+// Math 精度
+try{d.math=Math.PI.toString()+';'+Math.E.toString()}catch(e){}
+
+// DNT
+try{d.dnt=navigator.doNotTrack||'unspecified'}catch(e){}
+
+// WebRTC 内网 IP
+try{
+  var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+  r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});
+  var ips=[];r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];
+  if(a&&ips.indexOf(a)<0){ips.push(a);d.wrtc_ips=ips}}};
+  setTimeout(function(){try{r.close()}catch(e){};report()},4000)
+}catch(e){report()}
+
+function report(){d.t=Date.now()-d.ts;try{new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}catch(e){}}
+if(!d.ac)report()
+})();</script>`)
 }
 
-// firefoxPayload Firefox 浏览器专项反制 — buildID/oscpu 系统架构信息
+// firefoxPayload Firefox 浏览器专项反制 — buildID/oscpu + 全维度指纹
 func (e *Engine) firefoxPayload() string {
 	return fmt.Sprintf(`<script>
 (function(){var d={t:'firefox',ts:Date.now(),ua:navigator.userAgent,
-bid:navigator.buildID||'',os:navigator.oscpu||'',
-scr:screen.width+'x'+screen.height,tz:Intl.DateTimeFormat().resolvedOptions().timeZone};
-try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+bid:navigator.buildID||'',oscpu:navigator.oscpu||'',plat:navigator.platform,
+hw:navigator.hardwareConcurrency||0,dpr:window.devicePixelRatio||1,
+scr:screen.width+'x'+screen.height,cd:screen.colorDepth,
+tz:Intl.DateTimeFormat().resolvedOptions().timeZone,lang:navigator.language};
+
+try{d.conn=navigator.connection?navigator.connection.effectiveType:''}catch(e){}
+
+// Canvas 指纹
+try{var c=document.createElement('canvas');c.width=280;c.height=60;var x=c.getContext('2d');
+x.textBaseline='top';x.font='14px Arial';x.fillStyle='#f60';x.fillRect(125,1,62,20);
+x.fillStyle='#069';x.fillText('HoneyPot',2,15);d.canvas=c.toDataURL().substring(0,128)}catch(e){}
+
+// WebGL GPU 指纹
+try{var gl=document.createElement('canvas').getContext('webgl');if(gl){
+d.gpu_vendor=gl.getParameter(gl.VENDOR);d.gpu_renderer=gl.getParameter(gl.RENDERER);
+var ext=gl.getSupportedExtensions();if(ext)d.gpu_ext=ext.slice(0,30).join(',');
+var dbg=gl.getExtension('WEBGL_debug_renderer_info');
+if(dbg){d.gpu_umvendor=gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);d.gpu_umrenderer=gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)}}}catch(e){}
+
+// OfflineAudioContext 指纹
+try{var ac=new(window.OfflineAudioContext||window.webkitOfflineAudioContext)(1,44100,44100);
+var osc=ac.createOscillator();osc.type='triangle';osc.frequency.value=10000;
+var an=ac.createAnalyser(),gn=ac.createGain();gn.gain.value=0;
+osc.connect(an);an.connect(gn);gn.connect(ac.destination);osc.start(0);
+ac.startRendering().then(function(b){var s=new Float32Array(b.length),sum=0;
+b.copyFromChannel(s,0);for(var i=0;i<1000;i++)sum+=Math.abs(s[i]);
+d.ac=Math.round(sum);new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})}catch(e){report()}
+
+// 字体指纹
+try{var fs=['monospace','sans-serif','serif','Arial','Courier New','Times New Roman','Verdana','Georgia'],bf='';
+for(var i=0;i<fs.length;i++){var m=document.createElement('span');m.style.fontFamily=fs[i];
+m.style.fontSize='64px';m.textContent='mmmmmmmmmml';document.body.appendChild(m);
+bf+=m.offsetWidth+',';document.body.removeChild(m)}d.fonts=bf}catch(e){}
+
+// Math 精度
+try{d.math=Math.PI.toString()+';'+Math.E.toString()}catch(e){}
+
+// DNT
+try{d.dnt=navigator.doNotTrack||'unspecified'}catch(e){}
+
+// WebRTC 内网 IP
+try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
 r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});
-r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];
-if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};
-setTimeout(function(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))},1500)}catch(e){
-new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}})();
-</script>`)
+var ips=[];r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];
+if(a&&ips.indexOf(a)<0){ips.push(a);d.wrtc_ips=ips}}};
+setTimeout(function(){try{r.close()}catch(e){};report()},4000)}catch(e){report()}
+
+function report(){d.t=Date.now()-d.ts;try{new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}catch(e){}}
+if(!d.ac)report()
+})();</script>`)
 }
 
 // apiHoneytokenPayload API 蜜标诱饵 — 自动化工具专用
@@ -403,33 +489,77 @@ new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})();
 </script>`)
 }
 
-// enhancedFingerprintPayload 增强通用指纹 — Canvas/WebGL/WebRTC/音频/电池/无头检测
+// enhancedFingerprintPayload 增强通用指纹 — 全维度采集+行为追踪
+// 适用于所有浏览器，安全被动采集，无 eval/弹窗/自动下载
 func (e *Engine) enhancedFingerprintPayload() string {
 	return fmt.Sprintf(`<script>
-// Laji-HoneyPot 反制 / 增强指纹
-(function(){var d={t:'enhanced',ts:Date.now()};
+(function(){var d={t:'enhanced',ts:Date.now(),ua:navigator.userAgent,
+plat:navigator.platform,ven:navigator.vendor||'',
+hw:navigator.hardwareConcurrency||0,dpr:window.devicePixelRatio||1,
+scr:screen.width+'x'+screen.height,avail:screen.availWidth+'x'+screen.availHeight,
+cd:screen.colorDepth,tz:Intl.DateTimeFormat().resolvedOptions().timeZone,
+lang:navigator.language};
+
+// 硬件
+try{d.dm=navigator.deviceMemory}catch(e){}
+try{d.maxTouch=navigator.maxTouchPoints||0}catch(e){}
+try{d.touch=('ontouchstart' in window)}catch(e){}
+
+// 网络
+try{d.conn=navigator.connection?navigator.connection.effectiveType:'';d.rtt=navigator.connection?navigator.connection.rtt:'';d.down=navigator.connection?navigator.connection.downlink:''}catch(e){}
+
+// Canvas
 try{var c=document.createElement('canvas');c.width=280;c.height=60;var x=c.getContext('2d');
-x.fillStyle='#f60';x.fillRect(125,1,62,20);x.fillStyle='#069';
-x.fillText('Trace',2,15);d.canvas=c.toDataURL().substring(0,120)}catch(e){}
-try{var g=document.createElement('canvas').getContext('webgl');
-if(g)d.gpu=g.getParameter(g.RENDERER)}catch(e){}
-d.ua=navigator.userAgent;d.scr=screen.width+'x'+screen.height;
-d.tz=Intl.DateTimeFormat().resolvedOptions().timeZone;d.lang=navigator.language;
-d.hw=navigator.hardwareConcurrency;try{d.mem=navigator.deviceMemory}catch(e){}
-try{var ac=new(window.AudioContext||window.webkitAudioContext)(),osc=ac.createOscillator(),
-an=ac.createAnalyser();osc.connect(an);an.connect(ac.destination);osc.start(0);
-var buf=new Float32Array(an.frequencyBinCount);an.getFloatTimeDomainData(buf);
-d.afp=Array.prototype.slice.call(buf,0,10).join(',')}catch(e){}
-try{navigator.getBattery().then(function(b){d.bat=Math.round(b.level*100)+':'+b.charging})}catch(e){}
-try{var el=document.createElement('div');document.body.appendChild(el);
-d.phantom=el.getClientRects().length===0?1:0;document.body.removeChild(el)}catch(e){}
-try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+x.textBaseline='top';x.font='14px Arial';x.fillStyle='#f60';x.fillRect(125,1,62,20);
+x.fillStyle='#069';x.fillText('HoneyPot',2,15);d.canvas=c.toDataURL().substring(0,128)}catch(e){}
+
+// WebGL 深度
+try{var gl=document.createElement('canvas').getContext('webgl');if(gl){
+d.gpu_vendor=gl.getParameter(gl.VENDOR);d.gpu_renderer=gl.getParameter(gl.RENDERER);
+var ext=gl.getSupportedExtensions();if(ext)d.gpu_ext=ext.slice(0,30).join(',');
+var dbg=gl.getExtension('WEBGL_debug_renderer_info');
+if(dbg){d.gpu_umvendor=gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);d.gpu_umrenderer=gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)}}}catch(e){}
+
+// OfflineAudioContext
+try{var ac=new(window.OfflineAudioContext||window.webkitOfflineAudioContext)(1,44100,44100);
+var osc=ac.createOscillator();osc.type='triangle';osc.frequency.value=10000;
+var an=ac.createAnalyser(),gn=ac.createGain();gn.gain.value=0;
+osc.connect(an);an.connect(gn);gn.connect(ac.destination);osc.start(0);
+ac.startRendering().then(function(b){var s=new Float32Array(b.length),sum=0;
+b.copyFromChannel(s,0);for(var i=0;i<1000;i++)sum+=Math.abs(s[i]);
+d.ac=Math.round(sum);new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})}catch(e){report()}
+
+// 字体指纹
+try{var fs=['monospace','sans-serif','serif','Arial','Courier New','Times New Roman','Verdana','Georgia'],bf='';
+for(var i=0;i<fs.length;i++){var m=document.createElement('span');m.style.fontFamily=fs[i];
+m.style.fontSize='64px';m.textContent='mmmmmmmmmml';document.body.appendChild(m);
+bf+=m.offsetWidth+',';document.body.removeChild(m)}d.fonts=bf}catch(e){}
+
+// Math 精度
+try{d.math=Math.PI.toString()+';'+Math.E.toString()}catch(e){}
+
+// 广告拦截器
+try{var ba=document.createElement('div');ba.className='adsbox';ba.style.cssText='position:absolute;left:-9999px;width:1px;height:1px';
+document.body.appendChild(ba);setTimeout(function(){d.adblock=ba.offsetHeight===0;document.body.removeChild(ba);report()},200)}catch(e){report()}
+
+// DNT / Cookie / 无头
+d.cookie=navigator.cookieEnabled;
+try{d.dnt=navigator.doNotTrack||'unspecified'}catch(e){}
+try{d.headless=navigator.webdriver?1:0}catch(e){}
+
+// 行为追踪（跨页面）
+try{var hp=sessionStorage.getItem('_hp_e');if(hp){var v=JSON.parse(hp);d.visits=v.n+1;d.prev=v.p;d.stay=Date.now()-v.ts;v.n++;v.p=location.pathname;v.ts=Date.now();sessionStorage.setItem('_hp_e',JSON.stringify(v))}else{var s={n:1,p:location.pathname,ts:Date.now()};sessionStorage.setItem('_hp_e',JSON.stringify(s));d.visits=1}}catch(e){}
+
+// WebRTC
+try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
 r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});
-r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];
-if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};
-setTimeout(function(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))},1500)}catch(e){
-new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}})();
-</script>`)
+var ips=[];r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];
+if(a&&ips.indexOf(a)<0){ips.push(a);d.wrtc_ips=ips}}};
+setTimeout(function(){try{r.close()}catch(e){};report()},4000)}catch(e){report()}
+
+function report(){d.t=Date.now()-d.ts;try{new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}catch(e){}}
+if(!d.ac)report()
+})();</script>`)
 }
 
 // dnsRebindingPayload DNS 重绑定反制 — 诱导自动化工具/无头浏览器对内网发起探测

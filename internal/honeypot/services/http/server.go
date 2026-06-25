@@ -1008,10 +1008,66 @@ func (s *Server) defaultJSPPage() string {
 </html>`
 }
 
-// buildFingerprintJS 生成浏览器被动指纹采集代码（增强版）
-// 采集：Canvas、WebGL、屏幕、时区、语言、插件、WebRTC IP、Navigator 属性、AudioContext、电池、网络、无头检测
+// buildFingerprintJS 生成浏览器被动指纹采集代码（全维度增强版）
+// 安全设计：全部被动采集，无 eval、无弹窗、无自动下载，try/catch 全包裹
+// 采集维度：Canvas/WebGL/音频/屏幕/时区/语言/插件/设备/网络/触屏/字体/Math/行为追踪/公网IP
 func buildFingerprintJS() string {
-	return `(function(){var d={};try{var c=document.createElement('canvas');c.width=280;c.height=60;var x=c.getContext('2d');x.fillStyle='#f60';x.fillRect(125,1,62,20);x.fillStyle='#069';x.fillText('Trace',2,15);d.canvas=c.toDataURL().substring(0,120)}catch(e){d.canvas='err'}try{var g=document.createElement('canvas').getContext('webgl');if(g){d.gpu=g.getParameter(g.RENDERER)}}catch(e){}d.scr=screen.width+'x'+screen.height;d.avail=screen.availWidth+'x'+screen.availHeight;d.cd=screen.colorDepth;d.pd=screen.pixelDepth;d.tz=Intl.DateTimeFormat().resolvedOptions().timeZone;d.lang=navigator.language;d.plat=navigator.platform;d.ps=navigator.productSub;d.ven=navigator.vendor;d.vs=navigator.vendorSub;d.hc=navigator.hardwareConcurrency;try{d.dm=navigator.deviceMemory}catch(e){}try{var p=[];for(var i=0;i<navigator.plugins.length;i++)p.push(navigator.plugins[i].name);d.plugins=p;d.plugLen=navigator.plugins.length}catch(e){}try{var ac=new(window.AudioContext||window.webkitAudioContext)(),osc=ac.createOscillator(),an=ac.createAnalyser();osc.connect(an);an.connect(ac.destination);osc.start(0);var buf=new Float32Array(an.frequencyBinCount);an.getFloatTimeDomainData(buf);d.afp=Array.prototype.slice.call(buf,0,10).join(',')}catch(e){}try{navigator.getBattery().then(function(b){d.bat=Math.round(b.level*100)+':'+b.charging})}catch(e){}try{d.conn=navigator.connection.effectiveType}catch(e){}try{var el=document.createElement('div');document.body.appendChild(el);d.crW=el.getClientRects().length===0?1:0;d.ow=window.outerWidth===0?1:0;document.body.removeChild(el)}catch(e){d.crW=0;d.ow=0}try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];if(a&&a.match(/^(192\\.168\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/))d.ip=a}};setTimeout(function(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))},2000)}catch(e){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}})();`
+	return `(function(){
+var d={},t0=Date.now();
+
+// ---- 行为追踪：跨页面 sessionStorage 持久化 ----
+try{
+  var hp=sessionStorage.getItem('_hp_v');
+  if(hp){var v=JSON.parse(hp);d.visits=v.n+1;d.first=v.f;d.prev=v.p;d.stay=Date.now()-v.ts;v.n++;v.p=location.pathname;v.ts=Date.now();sessionStorage.setItem('_hp_v',JSON.stringify(v))}
+  else{var s={n:1,f:Date.now(),p:location.pathname,ts:Date.now()};sessionStorage.setItem('_hp_v',JSON.stringify(s));d.visits=1;d.first=Date.now()}
+}catch(e){}
+
+// ---- 浏览器基础属性 ----
+d.ua=navigator.userAgent;d.plat=navigator.platform;d.ven=navigator.vendor||'';d.venSub=navigator.vendorSub||'';
+
+// ---- Canvas 指纹 ----
+try{var c=document.createElement('canvas');c.width=280;c.height=60;var x=c.getContext('2d');x.textBaseline='top';x.font='14px Arial';x.fillStyle='#f60';x.fillRect(125,1,62,20);x.fillStyle='#069';x.fillText('HoneyPot',2,15);x.fillStyle='rgba(102,204,0,0.7)';x.fillText('HoneyPot',4,17);d.canvas=c.toDataURL().substring(0,128)}catch(e){d.canvas='err'}
+
+// ---- WebGL GPU 指纹（含扩展列表与像素精度） ----
+try{var gl=document.createElement('canvas').getContext('webgl')||document.createElement('canvas').getContext('experimental-webgl');if(gl){d.wgl_vendor=gl.getParameter(gl.VENDOR);d.wgl_renderer=gl.getParameter(gl.RENDERER);var ext=gl.getSupportedExtensions();if(ext)d.wgl_ext=ext.slice(0,30).join(',');var dbg=gl.getExtension('WEBGL_debug_renderer_info');if(dbg){d.wgl_umvendor=gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);d.wgl_umrenderer=gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)}var m=16,tile=new Uint8Array(m*4),pxl=new Uint32Array(tile.buffer),ps='';for(var i=0;i<m;i++)pxl[i]=Math.floor(Math.random()*0xFFFFFFFF);gl.readPixels(0,0,4,4,gl.RGBA,gl.UNSIGNED_BYTE,tile);for(var i=0;i<32;i++)ps+=tile[i].toString(16);d.wgl_pixel=ps}}catch(e){}
+
+// ---- 屏幕信息 ----
+d.scr=screen.width+'x'+screen.height;d.avail=screen.availWidth+'x'+screen.availHeight;d.cd=screen.colorDepth;d.pd=screen.pixelDepth;d.dpr=window.devicePixelRatio||1;
+
+// ---- 时区与国际 ----
+d.tz=Intl.DateTimeFormat().resolvedOptions().timeZone;d.lang=navigator.language;try{d.langs=navigator.languages}catch(e){d.langs=[navigator.language]}try{d.cal=new Date().toString().match(/\(([^)]+)\)/)[1]}catch(e){}
+
+// ---- 硬件信息 ----
+try{d.hc=navigator.hardwareConcurrency}catch(e){}try{d.dm=navigator.deviceMemory}catch(e){}try{d.maxTouch=navigator.maxTouchPoints||0}catch(e){}try{d.touch=('ontouchstart' in window)}catch(e){}
+
+// ---- 网络类型 ----
+try{d.conn=navigator.connection.effectiveType}catch(e){}try{d.rtt=navigator.connection.rtt}catch(e){}try{d.downlink=navigator.connection.downlink}catch(e){}
+
+// ---- 插件枚举 ----
+try{var pl=[];for(var i=0;i<navigator.plugins.length;i++)pl.push(navigator.plugins[i].name);d.plugins=pl;d.pLen=navigator.plugins.length}catch(e){}
+
+// ---- 字体指纹（CSS测量法，无Flash依赖） ----
+try{var fs=['monospace','sans-serif','serif','Arial','Courier New','Times New Roman','Verdana','Georgia','Comic Sans MS','Trebuchet MS','Impact'],fw=[56,64,72],bf='';for(var i=0;i<fs.length;i++){for(var j=0;j<fw.length;j++){var m=document.createElement('span');m.style.fontFamily=fs[i];m.style.fontSize=fw[j]+'px';m.textContent='mmmmmmmmmml';document.body.appendChild(m);bf+=m.offsetWidth+',';document.body.removeChild(m)}}d.fonts=bf.substring(0,200)}catch(e){}
+
+// ---- Math 计算精度指纹 ----
+try{d.math_pi=Math.PI.toString();d.math_e=Math.E.toString()}catch(e){}
+
+// ---- AudioContext 指纹（OfflineAudioContext 绕过自动播放限制） ----
+try{var actx=new(window.OfflineAudioContext||window.webkitOfflineAudioContext)(1,44100,44100),osc=actx.createOscillator();osc.type='triangle';osc.frequency.value=10000;var an=actx.createAnalyser(),gn=actx.createGain();gn.gain.value=0;osc.connect(an);an.connect(gn);gn.connect(actx.destination);osc.start(0);actx.startRendering().then(function(b){var s=new Float32Array(b.length),sum=0;b.copyFromChannel(s,0);for(var i=0;i<Math.min(s.length,1000);i++)sum+=Math.abs(s[i]);try{new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify({ac:Math.round(sum)}))}catch(e){}})}catch(e){}
+
+// ---- 广告拦截器/隐私检测 ----
+try{var ba=document.createElement('div');ba.className='adsbox';ba.style.cssText='position:absolute;left:-999px;width:1px;height:1px';document.body.appendChild(ba);setTimeout(function(){d.adblock=ba.offsetHeight===0;document.body.removeChild(ba)},100)}catch(e){}
+d.cookie=navigator.cookieEnabled;try{d.dnt=navigator.doNotTrack||navigator.msDoNotTrack||'unspecified'}catch(e){}
+
+// ---- 无头浏览器/自动化检测 ----
+try{d.headless=navigator.webdriver?1:0}catch(e){}
+
+// ---- WebRTC 内网 IP（多 STUN 服务器） ----
+try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});var ips=[];r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];if(a&&ips.indexOf(a)<0){ips.push(a);d.ips=ips}}};setTimeout(function(){try{r.close()}catch(e){}},5000)}catch(e){}
+
+// ---- 延迟上报（等待 WebRTC IP 采集完成） ----
+setTimeout(function(){d.t=Date.now()-t0;try{new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}catch(e){}},3000)
+})();`
 }
 
 // detectPayloadType 从反制 JS 中识别载荷类型
