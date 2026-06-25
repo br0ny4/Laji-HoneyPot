@@ -124,7 +124,7 @@ docker compose up -d
 
 | 触发条件 | 反制手段 | 采集信息 |
 |---------|---------|---------|
-| 面包屑路径访问 | JS 浏览器指纹采集 | WebRTC 内网 IP、Canvas/WebGL 指纹、GPU 型号、屏幕分辨率 |
+| 面包屑路径访问 | JS 浏览器指纹采集（19维 + 截屏检测） | WebRTC 内网 IP、Canvas/WebGL 指纹、GPU 型号、屏幕分辨率、截屏/录屏行为 |
 | Cobalt Strike Beacon | CVE-2022-39197 XSS 回击 | CS 团队服务器 IP + 证书信息 |
 | 冰蝎 WebShell 连接 | Java JSP 反制 Payload | 主机名、OS、用户名、Java 版本 |
 | Burp Collaborator 请求 | DNSLOG + WebRTC STUN 泄露 | 内网 IP、浏览器指纹 |
@@ -333,7 +333,7 @@ Laji-HoneyPot/
 - [x] 微内核架构 + 事件总线 + 配置中心
 - [x] HTTP / MySQL / Redis / SSH 四大蜜罐服务
 - [x] 被动 TLS ClientHello 检测
-- [x] 面包屑引流机制（20 个隐藏路径）
+- [x] 面包屑引流机制（50 个隐藏路径）
 - [x] 漏洞数据库 + 攻击者指纹采集
 - [x] 反制 Payload 生成器（CS / 冰蝎 / Chrome / Firefox）
 - [x] React 管理面板 + SSE 实时推送
@@ -355,8 +355,11 @@ Laji-HoneyPot/
 - [x] 多维度分析引擎（基础属性/攻击技术/主观特征）
 - [x] 8因子技能评分 + 行为双语评分 + 动机路径分析
 - [x] 画像可视化面板（标签筛选/TTPs图谱/详情Modal/威胁等级大盘）
+- [x] 反制能力增强 -- 截屏/录屏检测 + 敏感文件读取Exp防御（v0.9.6）
+- [x] 面包屑路径30->50条（新增敏感文件/加密分区/路径穿越/云凭证）
+- [x] 风险等级系统（攻击事件+反制事件四级判定）
+- [x] VulnDB 7->17条（新增Log4Shell/SpringGateway/Apache路径穿越/截屏劫持等）
 - [ ] 分布式集群架构（管理端 + 远程蜜罐节点）
-- [ ] 反制能力增强（截屏、文件读取 PoC）
 - [ ] 智能载荷选择扩展到 iOS/Android 指纹
 
 ---
@@ -370,7 +373,7 @@ Laji-HoneyPot/
 | **溯源反制** | **11 种载荷 + 智能选择 + 效果闭环** | 基础内置溯源 |
 | **反制深度** | **DNS 重绑定 / WebRTC 扫描 / VPN 诱饵 / Heapdump** | 未涉及 |
 | **拓扑可视化** | **G6 双向攻击/反制路径图** | 基础展示 |
-| **面包屑机制** | **20 个隐藏路径 + 自动注入** | 蜜饵配置 |
+| **面包屑机制** | **50 个隐藏路径 + 自动注入** | 蜜饵配置 |
 | 全端口扫描 | **连接频率检测(5端口/60s)** | TCP/UDP/ICMP 感知 |
 | 告警通道 | **Webhook/钉钉/飞书** | 邮件/Syslog/钉钉/飞书/企微 |
 | 跨平台 | Linux/macOS | **Linux/Win/ARM/国产OS+CPU** |
