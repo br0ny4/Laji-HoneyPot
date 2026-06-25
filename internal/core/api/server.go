@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
+	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/vulndb"
 )
@@ -23,6 +24,7 @@ type Server struct {
 	store           *store.Store
 	vulnDB          *vulndb.DB
 	wsHub           *WSHub
+	profileEngine   *profile.Engine
 	mux             *http.ServeMux
 	apiKey          string // 管理后台认证密钥，空则不启用
 	startTime       time.Time
@@ -32,13 +34,14 @@ type Server struct {
 // NewServer 创建 API 服务器
 func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, apiKey string) *Server {
 	s := &Server{
-		logger:    logger,
-		store:     st,
-		vulnDB:    vdb,
-		wsHub:     hub,
-		mux:       http.NewServeMux(),
-		apiKey:    apiKey,
-		startTime: time.Now(),
+		logger:        logger,
+		store:         st,
+		vulnDB:        vdb,
+		wsHub:         hub,
+		profileEngine: profile.NewEngine(),
+		mux:           http.NewServeMux(),
+		apiKey:        apiKey,
+		startTime:     time.Now(),
 	}
 	s.registerRoutes()
 	return s
@@ -80,6 +83,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/events", s.wsHub.ServeWS)
 	// 浏览器指纹采集
 	s.mux.HandleFunc("/api/collect", s.handleCollect)
+	// 攻击者画像
+	s.mux.HandleFunc("/api/profiles", s.handleProfiles)
+	s.mux.HandleFunc("/api/profiles/stats", s.handleProfileStats)
+	s.mux.HandleFunc("/api/profiles/tags", s.handleProfileTags)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -537,5 +544,84 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// ---------- 攻击者画像 API ----------
+
+func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/profiles")
+	ip := r.URL.Query().Get("ip")
+
+	// /api/profiles?ip=1.2.3.4 — 单个画像详情
+	if ip != "" {
+		p, err := s.store.AggregateProfileByIP(s.profileEngine, ip)
+		if err != nil {
+			s.logger.Errorw("profile query failed", "ip", ip, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, p)
+		return
+	}
+
+	// /api/profiles — 列表（支持标签筛选 ?tag=skill）
+	tagFilter := r.URL.Query().Get("tag")
+	profiles, err := s.store.AggregateAllProfiles(s.profileEngine, tagFilter)
+	if err != nil {
+		s.logger.Errorw("profiles query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":    len(profiles),
+		"profiles": profiles,
+	})
+	_ = path
+}
+
+func (s *Server) handleProfileStats(w http.ResponseWriter, r *http.Request) {
+	profiles, err := s.store.AggregateAllProfiles(s.profileEngine, "")
+	if err != nil {
+		s.logger.Errorw("profile stats failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+
+	skillDist := map[string]int{"novice": 0, "script_kiddie": 0, "intermediate": 0, "advanced_actor": 0}
+	behaviorDist := map[string]int{}
+	motiveDist := map[string]int{}
+	toolDist := map[string]int{}
+	threatDist := map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0}
+
+	for _, p := range profiles {
+		threatDist[p.ThreatLevel]++
+		for _, t := range p.Tags {
+			switch t.Category {
+			case "skill":
+				skillDist[t.Name]++
+			case "behavior":
+				behaviorDist[t.Name]++
+			case "motive":
+				motiveDist[t.Name]++
+			case "tool":
+				toolDist[t.Name]++
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total_profiles": len(profiles),
+		"skill_dist":     skillDist,
+		"behavior_dist":  behaviorDist,
+		"motive_dist":    motiveDist,
+		"tool_dist":      toolDist,
+		"threat_dist":    threatDist,
+	})
+}
+
+func (s *Server) handleProfileTags(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"categories": profile.TagCategories,
 	})
 }

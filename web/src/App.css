@@ -912,3 +912,243 @@ body {
 .log-warn .log-msg { color: #fbbf24; }
 .log-info .log-level { color: #64748b; }
 .log-empty { padding: 16px; color: #475569; text-align: center; }
+
+/* ========== Attacker Profile Panel ========== */
+.profile-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.profile-stats-card {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  border: 1px solid #334155;
+  transition: border-color 0.2s;
+}
+.profile-stats-card:hover { border-color: #38bdf8; }
+
+.ps-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: #38bdf8;
+}
+.ps-label { font-size: 11px; color: #64748b; margin-top: 4px; }
+
+.tag-filter-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  padding: 5px 14px;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.filter-chip:hover { border-color: #38bdf8; color: #e2e8f0; }
+.filter-chip.active {
+  background: #1e3a5f;
+  border-color: #38bdf8;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.profile-card:hover { border-color: #38bdf8; background: #1e2e44; }
+.profile-card.selected { border-color: #38bdf8; box-shadow: 0 0 0 1px #38bdf840; }
+
+.pc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.pc-ip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pc-ip {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fca5a5;
+}
+
+.pc-threat {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pc-score {
+  font-size: 12px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pc-divider { color: #334155; }
+
+.pc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.profile-tag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.pc-metrics {
+  display: flex;
+  gap: 20px;
+}
+
+.pc-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.pc-metric-val {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.pc-metric-label {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.pc-ttps {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.pc-ttp-chip {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #0f172a;
+  color: #f59e0b;
+  font-size: 10px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  border: 1px solid #f59e0b30;
+}
+
+.pc-ttp-more {
+  font-size: 10px;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+
+/* Profile Detail Overlay */
+.profile-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.profile-detail-panel {
+  background: #1e293b;
+  border-radius: 12px;
+  max-width: 640px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  border: 1px solid #334155;
+}
+
+/* TTP 技术图谱条 */
+.ttp-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ttp-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ttp-bar-tactic {
+  font-size: 11px;
+  color: #94a3b8;
+  width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.ttp-bar-id {
+  font-size: 10px;
+  color: #f59e0b;
+  width: 56px;
+  flex-shrink: 0;
+}
+
+.ttp-bar-track {
+  flex: 1;
+  height: 6px;
+  background: #0f172a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ttp-bar-fill {
+  height: 100%;
+  background: #38bdf8;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.ttp-bar-cnt {
+  font-size: 11px;
+  color: #64748b;
+  width: 20px;
+  text-align: right;
+  font-family: monospace;
+}

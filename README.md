@@ -193,6 +193,7 @@ api_key: "your-custom-key"
 | 资产台账 | 攻击者 IP 维度汇总（风险评级） | `/api/attackers` |
 | 端口扫描 | 端口扫描感知记录 | `/api/portscans` |
 | 运维管理 | 系统状态 + 部署指南 + 性能指标 | `/api/system` + `/api/metrics` |
+| **攻击者画像** | **多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选** | `/api/profiles` + `/api/profiles/stats` |
 
 ### 运行时监控
 
@@ -265,12 +266,29 @@ curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/stats/detailed
 
 | Payload | 适用目标 | 采集信息 |
 |---------|---------|---------|
-| `js_browser` | 所有浏览器 | Canvas/WebGL/WebRTC 内网 IP/插件列表 |
+| `js_browser` | 所有浏览器 | 19维指纹(Canvas/WebGL深度/OfflineAudioContext/字体/WebRTC) |
 | `chrome_exploit` | Chrome ≤ 119 | 设备硬件信息 + 社工诱饵下载 |
 | `firefox_exploit` | Firefox ≤ 121 | buildID + oscpu 信息 |
 | `cs_xss` | Cobalt Strike | 团队服务器 IP + 证书 |
 | `behinder_jsp` | 冰蝎 | 主机名 + OS + 用户名 + Java 版本 |
 | `dns_rebinding` | curl/wget/Python | DNS 解析链路追踪 |
+
+### 攻击者画像与威胁标签
+
+基于多维度数据聚合的攻击者智能画像系统，自动匹配威胁标签并量化威胁等级。
+
+| 维度 | 内容 |
+|------|------|
+| **基础属性** | IP / 地理位置 / 常用端口 / 工具偏好 / 活跃时段 / 攻击频次 |
+| **攻击技术** | TTPs 签名(MITRE ATT&CK) / 战术覆盖 / 攻击成功率 / 交互深度 |
+| **主观特征** | 技术水平(新手~高级) / 行为性格(谨慎/激进) / 攻击目的(数据窃取/WebShell/侦查等) |
+
+**威胁标签引擎**：
+- 8因子加权技能评分（多服务扫描、端口扫描、多路径探测、活跃天数、高频攻击、交互深度、多工具、TTP广度）
+- 行为特征双语评分（谨慎5因子 vs 激进4因子）
+- 路径语义分析判定攻击动机（数据窃取/权限提升/API探测/WebShell/凭据爆破/侦查）
+- User-Agent 工具指纹检测（Nuclei/SQLMap/Burp Suite/Chrome/Firefox/脚本）
+
 
 ---
 
@@ -332,6 +350,11 @@ Laji-HoneyPot/
 - [x] 全端口扫描感知（v0.8）
 - [x] 自定义 HTTP 蜜罐模板 YAML 扩展（v0.9）
 - [x] 前后端日志系统 + 调试状态栏（v0.9.1）
+- [x] 浏览器被动指纹增强至19维（Canvas/WebGL深度/OfflineAudioContext/字体/WebRTC多STUN）
+- [x] 攻击者画像与威胁标签系统（v0.9.5）
+- [x] 多维度分析引擎（基础属性/攻击技术/主观特征）
+- [x] 8因子技能评分 + 行为双语评分 + 动机路径分析
+- [x] 画像可视化面板（标签筛选/TTPs图谱/详情Modal/威胁等级大盘）
 - [ ] 分布式集群架构（管理端 + 远程蜜罐节点）
 - [ ] 反制能力增强（截屏、文件读取 PoC）
 - [ ] 智能载荷选择扩展到 iOS/Android 指纹

@@ -6,10 +6,11 @@ import FingerprintPanel from './components/FingerprintPanel';
 import CountermeasurePanel from './components/CountermeasurePanel';
 import AssetLedger from './components/AssetLedger';
 import OpsPanel from './components/OpsPanel';
+import AttackerProfilePanel from './components/AttackerProfilePanel';
 import StatusBar from './components/StatusBar';
 import './App.css';
 
-type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'ops';
+type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'ops' | 'profiles';
 
 interface TabDef {
   key: Tab;
@@ -25,6 +26,7 @@ const tabs: TabDef[] = [
   { key: 'countermeasures', label: '反制日志', icon: '' },
   { key: 'assets', label: '资产台账', icon: '' },
   { key: 'ops', label: '运维管理', icon: '' },
+  { key: 'profiles', label: '攻击者画像', icon: '' },
 ];
 
 export default function App() {
@@ -64,6 +66,7 @@ export default function App() {
         {activeTab === 'countermeasures' && <CountermeasurePanel />}
         {activeTab === 'assets' && <AssetLedger />}
         {activeTab === 'ops' && <OpsPanel />}
+        {activeTab === 'profiles' && <AttackerProfilePanel />}
       </main>
 
       <StatusBar />

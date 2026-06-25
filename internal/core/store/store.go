@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -967,4 +968,199 @@ func (s *Store) GetPortScans(limit int) ([]PortScanEvent, error) {
 // Close 关闭数据库连接
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// ---------- 攻击者画像数据聚合 ----------
+
+// AggregateProfileData 从各表聚合单个 IP 的画像原始数据
+func (s *Store) AggregateProfileData(ip string) (*profile.ProfileData, error) {
+	data := &profile.ProfileData{IP: ip}
+
+	// 1. 连接统计
+	connRows, err := s.db.Query(
+		`SELECT timestamp, port, service, user_agent FROM connections WHERE remote_ip = ? ORDER BY timestamp`, ip)
+	if err != nil {
+		return nil, fmt.Errorf("query connections: %w", err)
+	}
+	serviceSet := make(map[string]bool)
+	serviceCounts := make(map[string]int)
+	uaSet := make(map[string]bool)
+	hourDist := make(map[int]int)
+	for connRows.Next() {
+		var ts time.Time
+		var port int
+		var svc, ua string
+		if err := connRows.Scan(&ts, &port, &svc, &ua); err != nil {
+			continue
+		}
+		if data.TotalConnections == 0 {
+			data.FirstSeen = ts
+		}
+		data.LastSeen = ts
+		data.TotalConnections++
+		serviceSet[svc] = true
+		serviceCounts[svc]++
+		if ua != "" {
+			uaSet[ua] = true
+		}
+		hourDist[ts.Hour()]++
+	}
+	connRows.Close()
+	for svc := range serviceSet {
+		data.UniqueServices = append(data.UniqueServices, svc)
+	}
+	for ua := range uaSet {
+		data.UAs = append(data.UAs, ua)
+	}
+	data.ServiceCounts = serviceCounts
+	data.HourDistribution = hourDist
+
+	// 2. 攻击事件（面包屑）统计
+	atkRows, err := s.db.Query(
+		`SELECT timestamp, path, tool_name FROM attack_events WHERE remote_ip = ? OR remote_ip LIKE ? ORDER BY timestamp`,
+		ip, ip+":%")
+	if err == nil {
+		pathSet := make(map[string]bool)
+		pathCounts := make(map[string]int)
+		ttpMap := make(map[string]*profile.TTPSignature)
+		for atkRows.Next() {
+			var ts time.Time
+			var path, tool string
+			if err := atkRows.Scan(&ts, &path, &tool); err != nil {
+				continue
+			}
+			if data.TotalConnections == 0 || ts.Before(data.FirstSeen) {
+				data.FirstSeen = ts
+			}
+			if ts.After(data.LastSeen) {
+				data.LastSeen = ts
+			}
+			data.TotalBreadcrumbs++
+			pathSet[path] = true
+			pathCounts[path]++
+			tactic, tid, _ := mapBreadcrumbToTactic(path)
+			key := tactic + "|" + tid
+			if tp, ok := ttpMap[key]; ok {
+				tp.Count++
+			} else {
+				ttpMap[key] = &profile.TTPSignature{
+					Tactic:      tactic,
+					TacticCN:    ttpTacticCN(tactic),
+					TechniqueID: tid,
+					Count:       1,
+				}
+			}
+		}
+		atkRows.Close()
+		for p := range pathSet {
+			data.UniquePaths = append(data.UniquePaths, p)
+		}
+		data.PathCounts = pathCounts
+		for _, tp := range ttpMap {
+			data.TTPSignatures = append(data.TTPSignatures, *tp)
+		}
+	}
+
+	// 3. 指纹
+	s.db.QueryRow("SELECT COUNT(*) FROM fingerprints WHERE remote_ip = ? OR remote_ip LIKE ?",
+		ip, ip+":%").Scan(&data.TotalFingerprints)
+	if data.TotalFingerprints > 0 {
+		data.HasFingerprint = true
+	}
+
+	// 4. 反制事件
+	s.db.QueryRow("SELECT COUNT(*) FROM countermeasure_events WHERE remote_ip = ? OR remote_ip LIKE ?",
+		ip, ip+":%").Scan(&data.TotalCountermeasures)
+
+	// 5. 端口扫描
+	s.db.QueryRow("SELECT COUNT(*) FROM port_scan_events WHERE remote_ip = ?", ip).Scan(&data.PortScanCount)
+
+	// 6. POST 请求体
+	s.db.QueryRow("SELECT COUNT(*) FROM post_bodies WHERE remote_ip = ? OR remote_ip LIKE ?",
+		ip, ip+":%").Scan(&data.TotalPostBodies)
+
+	data.TotalAttacks = data.TotalBreadcrumbs + data.TotalCountermeasures + data.PortScanCount
+
+	return data, nil
+}
+
+// AggregateAllProfiles 获取所有攻击者画像（带标签）
+func (s *Store) AggregateAllProfiles(eng *profile.Engine, tagFilter string) ([]*profile.AttackerProfile, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT remote_ip FROM connections`)
+	if err != nil {
+		return nil, fmt.Errorf("query distinct ips: %w", err)
+	}
+	defer rows.Close()
+
+	var profiles []*profile.AttackerProfile
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			continue
+		}
+		// 跳过带端口的 IP（这些是从 attack_events 进来的）
+		if strings.Contains(ip, ":") {
+			continue
+		}
+		data, err := s.AggregateProfileData(ip)
+		if err != nil || data.TotalConnections == 0 {
+			continue
+		}
+		p := eng.Analyze(data)
+		if tagFilter != "" {
+			// 按标签过滤
+			matched := false
+			for _, t := range p.Tags {
+				if t.Category == tagFilter {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		profiles = append(profiles, p)
+	}
+	return profiles, rows.Err()
+}
+
+// AggregateProfileByIP 获取单个攻击者的完整画像
+func (s *Store) AggregateProfileByIP(eng *profile.Engine, ip string) (*profile.AttackerProfile, error) {
+	// 剥离端口号
+	if idx := strings.LastIndexByte(ip, ':'); idx > 0 {
+		ip = ip[:idx]
+	}
+	data, err := s.AggregateProfileData(ip)
+	if err != nil {
+		return nil, err
+	}
+	if data.TotalConnections == 0 {
+		data.FirstSeen = time.Now()
+		data.LastSeen = time.Now()
+	}
+	return eng.Analyze(data), nil
+}
+
+// ttpTacticCN ATT&CK 战术中文名
+func ttpTacticCN(tactic string) string {
+	m := map[string]string{
+		"Reconnaissance":       "侦察",
+		"Initial Access":       "初始访问",
+		"Execution":            "执行",
+		"Persistence":          "持久化",
+		"Privilege Escalation": "权限提升",
+		"Defense Evasion":      "防御规避",
+		"Credential Access":    "凭证访问",
+		"Discovery":            "发现",
+		"Lateral Movement":     "横向移动",
+		"Collection":           "采集",
+		"Command and Control":  "命令与控制",
+		"Exfiltration":         "数据渗出",
+		"Impact":               "影响",
+	}
+	if cn, ok := m[tactic]; ok {
+		return cn
+	}
+	return tactic
 }
