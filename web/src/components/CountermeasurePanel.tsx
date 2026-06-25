@@ -11,7 +11,15 @@ interface CountermeasureEvent {
   user_agent: string;
   effective: boolean;
   related_attack_id: number;
+  risk_level?: string;
 }
+
+const RISK_LEVEL_MAP: Record<string, { label: string; color: string }> = {
+  critical: { label: '严重', color: '#ef4444' },
+  high: { label: '高危', color: '#f97316' },
+  medium: { label: '中危', color: '#eab308' },
+  low: { label: '低危', color: '#22c55e' },
+};
 
 interface CMStats {
   total_deployed: number;
@@ -137,6 +145,12 @@ export default function CountermeasurePanel() {
                 <span className={`cm-badge ${typeClass(selected.payload_type)}`}>{typeLabel(selected.payload_type)}</span>
               </div>
               <div className="detail-row">
+                <span className="detail-label">风险等级</span>
+                <span className="detail-value" style={{ color: RISK_LEVEL_MAP[selected.risk_level || 'low']?.color, fontWeight: 600 }}>
+                  {RISK_LEVEL_MAP[selected.risk_level || 'low']?.label}
+                </span>
+              </div>
+              <div className="detail-row">
                 <span className="detail-label">时间</span>
                 <span className="detail-value">{new Date(selected.timestamp).toLocaleString('zh-CN')}</span>
               </div>
@@ -168,6 +182,7 @@ export default function CountermeasurePanel() {
             <th style={{ width: 160 }}>时间</th>
             <th style={{ width: 130 }}>IP</th>
             <th style={{ width: 130 }}>载荷类型</th>
+            <th style={{ width: 60 }}>风险</th>
             <th style={{ width: 160 }}>触发路径</th>
             <th>载荷摘要</th>
             <th style={{ width: 90 }}>效果</th>
@@ -181,6 +196,11 @@ export default function CountermeasurePanel() {
               <td className="cell-time">{new Date(c.timestamp).toLocaleString('zh-CN')}</td>
               <td className="mono">{c.remote_ip}</td>
               <td><span className={`cm-badge ${typeClass(c.payload_type)}`}>{typeLabel(c.payload_type)}</span></td>
+              <td>
+                <span style={{ color: RISK_LEVEL_MAP[c.risk_level || 'low']?.color, fontWeight: 600, fontSize: 12 }}>
+                  {RISK_LEVEL_MAP[c.risk_level || 'low']?.label}
+                </span>
+              </td>
               <td className="mono cell-path">{c.trigger_path}</td>
               <td className="cell-ua">{formatPreview(c.payload_preview)}</td>
               <td>{c.effective ? <span className="cm-effective-badge">已奏效</span> : <span className="cm-pending-badge">待验证</span>}</td>
@@ -188,7 +208,7 @@ export default function CountermeasurePanel() {
             </tr>
           ))}
           {cms.length === 0 && (
-            <tr><td colSpan={8} className="empty-hint">暂无反制记录 — 等待攻击者触发面包屑后自动部署</td></tr>
+            <tr><td colSpan={9} className="empty-hint">暂无反制记录 — 等待攻击者触发面包屑后自动部署</td></tr>
           )}
         </tbody>
       </table>

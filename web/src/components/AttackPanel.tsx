@@ -8,7 +8,15 @@ interface AttackEvent {
   path: string;
   tool_name: string;
   payload: string;
+  risk_level?: string;
 }
+
+const RISK_LEVEL_MAP: Record<string, { label: string; color: string }> = {
+  critical: { label: '严重', color: '#ef4444' },
+  high: { label: '高危', color: '#f97316' },
+  medium: { label: '中危', color: '#eab308' },
+  low: { label: '低危', color: '#22c55e' },
+};
 
 export default function AttackPanel() {
   const [attacks, setAttacks] = useState<AttackEvent[]>([]);
@@ -60,6 +68,12 @@ export default function AttackPanel() {
                 <span className="detail-value mono">{selected.remote_ip}</span>
               </div>
               <div className="detail-row">
+                <span className="detail-label">风险等级</span>
+                <span className="detail-value" style={{ color: RISK_LEVEL_MAP[selected.risk_level || 'low']?.color, fontWeight: 600 }}>
+                  {RISK_LEVEL_MAP[selected.risk_level || 'low']?.label}
+                </span>
+              </div>
+              <div className="detail-row">
                 <span className="detail-label">触发路径</span>
                 <span className="detail-value mono">{selected.path}</span>
               </div>
@@ -86,6 +100,7 @@ export default function AttackPanel() {
             <th>ID</th>
             <th>时间</th>
             <th>攻击IP</th>
+            <th style={{ width: 60 }}>风险</th>
             <th>路径</th>
             <th>检测工具</th>
             <th>操作</th>
@@ -97,6 +112,11 @@ export default function AttackPanel() {
               <td>{a.id}</td>
               <td className="cell-time">{new Date(a.timestamp).toLocaleString('zh-CN')}</td>
               <td className="mono">{a.remote_ip}</td>
+              <td>
+                <span style={{ color: RISK_LEVEL_MAP[a.risk_level || 'low']?.color, fontWeight: 600, fontSize: 12 }}>
+                  {RISK_LEVEL_MAP[a.risk_level || 'low']?.label}
+                </span>
+              </td>
               <td className="mono">{a.path}</td>
               <td><span className={`service-tag ${a.tool_name === 'unknown' ? 'tag-dim' : ''}`}>{a.tool_name}</span></td>
               <td>
@@ -105,7 +125,7 @@ export default function AttackPanel() {
             </tr>
           ))}
           {attacks.length === 0 && (
-            <tr><td colSpan={6} className="empty-hint">暂无攻击事件</td></tr>
+            <tr><td colSpan={7} className="empty-hint">暂无攻击事件</td></tr>
           )}
         </tbody>
       </table>

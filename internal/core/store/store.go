@@ -90,7 +90,8 @@ func (s *Store) migrate() error {
 		remote_ip TEXT NOT NULL,
 		path TEXT DEFAULT '',
 		tool_name TEXT DEFAULT 'unknown',
-		payload TEXT DEFAULT ''
+		payload TEXT DEFAULT '',
+		risk_level TEXT DEFAULT 'low'
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_conn_ts ON connections(timestamp);
@@ -118,7 +119,8 @@ func (s *Store) migrate() error {
 		payload_preview TEXT DEFAULT '',
 		user_agent TEXT DEFAULT '',
 		effective INTEGER DEFAULT 0,
-		related_attack_id INTEGER DEFAULT 0
+		related_attack_id INTEGER DEFAULT 0,
+		risk_level TEXT DEFAULT 'low'
 	);
 	CREATE INDEX IF NOT EXISTS idx_cm_ip ON countermeasure_events(remote_ip);
 	CREATE INDEX IF NOT EXISTS idx_cm_ts ON countermeasure_events(timestamp);
@@ -147,7 +149,16 @@ func (s *Store) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_pb_ts ON post_bodies(timestamp);
 	`
 	_, err := s.db.Exec(ddl)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 迁移现有数据库：为 attack_events 添加 risk_level 列
+	s.db.Exec("ALTER TABLE attack_events ADD COLUMN risk_level TEXT DEFAULT 'low'")
+	// 迁移现有数据库：为 countermeasure_events 添加 risk_level 列
+	s.db.Exec("ALTER TABLE countermeasure_events ADD COLUMN risk_level TEXT DEFAULT 'low'")
+
+	return nil
 }
 
 // RecordConnection 记录一次连接
@@ -176,11 +187,12 @@ func (s *Store) UpdateConnectionUA(remoteIP, service, userAgent string) error {
 	return err
 }
 
-// RecordAttack 记录一次攻击事件
+// RecordAttack 记录一次攻击事件（自动计算风险等级）
 func (s *Store) RecordAttack(remoteIP, path, toolName, payload string) (int64, error) {
+	riskLevel := BreadcrumbRiskLevel(path)
 	res, err := s.db.Exec(
-		"INSERT INTO attack_events (remote_ip, path, tool_name, payload) VALUES (?, ?, ?, ?)",
-		remoteIP, path, toolName, payload,
+		"INSERT INTO attack_events (remote_ip, path, tool_name, payload, risk_level) VALUES (?, ?, ?, ?, ?)",
+		remoteIP, path, toolName, payload, riskLevel,
 	)
 	if err != nil {
 		return 0, err
@@ -506,13 +518,40 @@ func mapServiceToTactic(service, toolName string) (tactic, techniqueID, label st
 }
 
 // mapBreadcrumbToTactic 将面包屑触发映射到 ATT&CK 战术
+// 返回 tactic, techniqueID, label。按风险等级从高到低匹配。
 func mapBreadcrumbToTactic(path string) (tactic, techniqueID, label string) {
+	// === 高风险：文件读取利用 / 路径穿越 Exploit ===
+	if strings.Contains(path, "/etc/passwd") || strings.Contains(path, "/etc/shadow") ||
+		strings.Contains(path, "/proc/self/") || strings.Contains(path, "id_rsa") ||
+		strings.Contains(path, "id_ed25519") || strings.Contains(path, "authorized_keys") ||
+		strings.Contains(path, "../..") || strings.Contains(path, "..;/") {
+		return "Credential Access", "T1003", "敏感文件读取Exploit"
+	}
+	if strings.Contains(path, "/etc/ssl/private") || strings.Contains(path, "/etc/kubernetes") ||
+		strings.Contains(path, ".kube/") || strings.Contains(path, ".docker/") {
+		return "Collection", "T1552", "基础设施凭证窃取"
+	}
+	if strings.Contains(path, ".aws/") {
+		return "Collection", "T1552", "云服务凭证窃取"
+	}
+
+	// === 中风险：加密分区/外置存储探测 ===
+	if strings.Contains(path, "crypttab") || strings.Contains(path, "/dev/mapper") {
+		return "Discovery", "T1082", "加密分区探测"
+	}
+	if strings.Contains(path, "/mnt/external") || strings.Contains(path, "/media/usb") {
+		return "Collection", "T1025", "外置存储探测"
+	}
+
+	// === 原有中高风险 ===
 	if strings.Contains(path, "heapdump") || strings.Contains(path, "actuator") {
 		return "Collection", "T1005", "敏感信息窃取"
 	}
 	if strings.Contains(path, ".git") || strings.Contains(path, ".env") || strings.Contains(path, "backup") {
 		return "Collection", "T1005", "源代码泄露探测"
 	}
+
+	// === 原有中低风险 ===
 	if strings.Contains(path, "admin") || strings.Contains(path, "login") || strings.Contains(path, "manage") {
 		return "Discovery", "T1083", "管理入口发现"
 	}
@@ -522,7 +561,33 @@ func mapBreadcrumbToTactic(path string) (tactic, techniqueID, label string) {
 	if strings.Contains(path, "nacos") || strings.Contains(path, "spring") || strings.Contains(path, "config") {
 		return "Discovery", "T1083", "配置信息探测"
 	}
+	if strings.Contains(path, "/var/log") {
+		return "Collection", "T1005", "日志文件探测"
+	}
+
 	return "Discovery", "T1083", "敏感路径探测"
+}
+
+// BreadcrumbRiskLevel 返回面包屑路径的风险等级 (critical/high/medium/low)
+func BreadcrumbRiskLevel(path string) string {
+	if strings.Contains(path, "/etc/shadow") || strings.Contains(path, "id_rsa") ||
+		strings.Contains(path, "id_ed25519") || strings.Contains(path, "authorized_keys") ||
+		strings.Contains(path, "/etc/ssl/private") {
+		return "critical"
+	}
+	if strings.Contains(path, "/etc/passwd") || strings.Contains(path, "/proc/self/") ||
+		strings.Contains(path, "../..") || strings.Contains(path, "..;/") ||
+		strings.Contains(path, ".kube/") || strings.Contains(path, ".docker/") ||
+		strings.Contains(path, ".aws/") || strings.Contains(path, "kubernetes") {
+		return "high"
+	}
+	if strings.Contains(path, "crypttab") || strings.Contains(path, "/dev/mapper") ||
+		strings.Contains(path, "/mnt/external") || strings.Contains(path, "/media/usb") ||
+		strings.Contains(path, "heapdump") || strings.Contains(path, ".git") ||
+		strings.Contains(path, ".env") || strings.Contains(path, "backup") {
+		return "medium"
+	}
+	return "low"
 }
 
 // GetTopologyData 生成攻击路径拓扑数据（含 ATT&CK 标签）
@@ -828,10 +893,11 @@ type CountermeasureStats struct {
 
 // RecordCountermeasure 记录一次反制部署
 func (s *Store) RecordCountermeasure(remoteIP, triggerPath, payloadType, payloadPreview, userAgent string, relatedAttackID int64) (int64, error) {
+	riskLevel := BreadcrumbRiskLevel(triggerPath)
 	res, err := s.db.Exec(
-		`INSERT INTO countermeasure_events (remote_ip, trigger_path, payload_type, payload_preview, user_agent, related_attack_id)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		remoteIP, triggerPath, payloadType, payloadPreview, userAgent, relatedAttackID,
+		`INSERT INTO countermeasure_events (remote_ip, trigger_path, payload_type, payload_preview, user_agent, related_attack_id, risk_level)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		remoteIP, triggerPath, payloadType, payloadPreview, userAgent, relatedAttackID, riskLevel,
 	)
 	if err != nil {
 		return 0, err
