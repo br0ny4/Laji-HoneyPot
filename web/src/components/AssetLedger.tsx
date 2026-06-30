@@ -12,9 +12,32 @@ interface AttackerSummary {
   user_agents: string;
 }
 
+// 资产扫描结果中单个服务信息
+interface ServiceInfo {
+  host: string;
+  port: number;
+  open: boolean;
+  protocol: string;
+  service: string;
+  banner: string;
+  scanned: string;
+}
+
+// 资产扫描结果汇总
+interface ScanResult {
+  total: number;
+  open: number;
+  services: ServiceInfo[];
+  duration: string;
+}
+
 export default function AssetLedger() {
   const [attackers, setAttackers] = useState<AttackerSummary[]>([]);
   const [selected, setSelected] = useState<AttackerSummary | null>(null);
+  // 资产扫描状态
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState('');
 
   useEffect(() => {
     apiFetch('/api/attackers?limit=100')
@@ -25,6 +48,23 @@ export default function AssetLedger() {
       .then((d) => setAttackers(d.attackers || []))
       .catch((err) => console.error('[AssetLedger] 获取攻击者列表失败:', err));
   }, []);
+
+  // 触发端口扫描
+  const handleScan = async () => {
+    setScanning(true);
+    setScanError('');
+    try {
+      const r = await apiFetch('/api/assets/scan', { method: 'POST' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data: ScanResult = await r.json();
+      setScanResult(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setScanError(`扫描失败: ${msg}`);
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const getRiskLevel = (a: AttackerSummary): string => {
     if (a.breadcrumb_cnt > 0) return '危险';
@@ -44,8 +84,87 @@ export default function AssetLedger() {
         <h2 className="section-title">资产台账 · 攻击者画像</h2>
         <span className="panel-controls">
           <span className="stat-chip">共 {attackers.length} 个攻击IP</span>
+          <button
+            className="btn-scan"
+            onClick={handleScan}
+            disabled={scanning}
+            style={{ marginLeft: 12 }}
+          >
+            {scanning ? '扫描中...' : '扫描端口'}
+          </button>
         </span>
       </div>
+
+      {/* 扫描错误提示 */}
+      {scanError && (
+        <div className="scan-error" style={{ padding: '8px 16px', color: '#e74c3c', background: '#fdf0ef', borderRadius: 6, margin: '0 16px 12px' }}>
+          {scanError}
+        </div>
+      )}
+
+      {/* 资产扫描结果 - 服务清单 */}
+      {scanResult && (
+        <div className="asset-inventory" style={{ margin: '0 16px 16px', border: '1px solid #2d3a4f', borderRadius: 8, overflow: 'hidden' }}>
+          <div className="inventory-header" style={{ padding: '10px 16px', background: '#1a2332', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0, fontSize: 14, color: '#c8d6e5' }}>
+              服务清单
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#5a6988' }}>
+                共 {scanResult.total} 端口 · {scanResult.open} 开放 · 耗时 {scanResult.duration}
+              </span>
+            </h3>
+            <button
+              className="btn-link"
+              onClick={() => setScanResult(null)}
+              style={{ color: '#5a6988' }}
+            >
+              收起
+            </button>
+          </div>
+          <table className="data-table" style={{ margin: 0 }}>
+            <thead>
+              <tr>
+                <th>主机</th>
+                <th>端口</th>
+                <th>状态</th>
+                <th>服务</th>
+                <th>Banner</th>
+                <th>扫描时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scanResult.services
+                .filter((s) => s.open) // 仅展示开放端口
+                .map((svc, i) => (
+                  <tr key={`${svc.host}:${svc.port}-${i}`}>
+                    <td className="mono">{svc.host}</td>
+                    <td className="mono">{svc.port}</td>
+                    <td>
+                      <span style={{ color: '#27ae60', fontWeight: 600 }}>开放</span>
+                    </td>
+                    <td>
+                      {svc.service ? (
+                        <span className="service-tag">{svc.service}</span>
+                      ) : (
+                        <span style={{ color: '#5a6988' }}>未知</span>
+                      )}
+                    </td>
+                    <td className="mono" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={svc.banner}>
+                      {svc.banner || '-'}
+                    </td>
+                    <td className="cell-time">{svc.scanned.slice(0, 19)}</td>
+                  </tr>
+                ))}
+              {scanResult.services.filter((s) => s.open).length === 0 && (
+                <tr>
+                  <td colSpan={6} className="empty-hint">
+                    {scanning ? '正在扫描...' : '未发现开放端口 — 本机可能已启用防火墙'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {selected && (
         <div className="attack-detail-modal" onClick={() => setSelected(null)}>

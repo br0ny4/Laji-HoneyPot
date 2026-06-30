@@ -190,7 +190,7 @@ api_key: "your-custom-key"
 | 攻击事件 | 面包屑触发记录列表 | `/api/attacks` |
 | 指纹采集 | 浏览器指纹详情（Canvas/GPU/屏幕/时区） | `/api/fingerprints` |
 | 反制日志 | 反制部署记录 + 效果追踪 + 载荷详情 | `/api/countermeasures` |
-| 资产台账 | 攻击者 IP 维度汇总（风险评级） | `/api/attackers` |
+| 资产台账 | 攻击者 IP 汇总 + 端口扫描 + 服务清单（风险评级/Banner识别） | `/api/attackers` + `/api/assets/scan` |
 | 端口扫描 | 端口扫描感知记录 | `/api/portscans` |
 | 运维管理 | 系统状态 + 部署指南 + 性能指标 | `/api/system` + `/api/metrics` |
 | **攻击者画像** | **多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选** | `/api/profiles` + `/api/profiles/stats` |
@@ -267,6 +267,8 @@ curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/stats/detailed
 | Payload | 适用目标 | 采集信息 |
 |---------|---------|---------|
 | `js_browser` | 所有浏览器 | 19维指纹(Canvas/WebGL深度/OfflineAudioContext/字体/WebRTC) |
+| `ios_fingerprint` | Safari/iOS | 平台/Battery/DeviceOrientation/ApplePay/Safari独立模式/Canvas/Connection |
+| `android_fingerprint` | Chrome/Android | Battery/WebGL GPU/AudioContext/Connection/Canvas/字体 |
 | `chrome_exploit` | Chrome ≤ 119 | 设备硬件信息 + 社工诱饵下载 |
 | `firefox_exploit` | Firefox ≤ 121 | buildID + oscpu 信息 |
 | `cs_xss` | Cobalt Strike | 团队服务器 IP + 证书 |
@@ -307,6 +309,7 @@ Laji-HoneyPot/
 │   │   ├── vulndb/            # 漏洞数据库 & NVD 爬虫
 │   │   ├── fingerprint/       # 攻击者指纹采集
 │   │   └── payload/           # Payload 生成与投递
+│   ├── asset/                 # 资产探测模块 (端口扫描/服务识别/Banner抓取)
 │   ├── alerter/               # 多通道告警 (Webhook/钉钉/飞书)
 │   └── ops/                   # 运维引擎 (GitHub同步/竞品调研)
 ├── web/                       # React 18 管理面板
@@ -359,8 +362,9 @@ Laji-HoneyPot/
 - [x] 面包屑路径30->50条（新增敏感文件/加密分区/路径穿越/云凭证）
 - [x] 风险等级系统（攻击事件+反制事件四级判定）
 - [x] VulnDB 7->17条（新增Log4Shell/SpringGateway/Apache路径穿越/截屏劫持等）
+- [x] 智能载荷选择扩展到 iOS/Android 指纹（v0.9.7）
+- [x] 资产探测模块 — TCP端口扫描 + 服务识别 + Banner抓取（v0.9.7）
 - [ ] 分布式集群架构（管理端 + 远程蜜罐节点）
-- [ ] 智能载荷选择扩展到 iOS/Android 指纹
 
 ---
 

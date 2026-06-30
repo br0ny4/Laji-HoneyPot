@@ -212,8 +212,18 @@ func (e *Engine) BehinderDecoyPage() string {
 func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 	ua := strings.ToLower(userAgent)
 
-	// 1. Chrome 浏览器 → Chrome 专项采集 + 内网扫描
-	if strings.Contains(ua, "chrome") && !strings.Contains(ua, "headless") && !strings.Contains(ua, "bot") {
+	// 0. iOS/Safari 移动设备 → 专项移动端指纹采集
+	if strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad") || strings.Contains(ua, "ipod") {
+		return e.iOSPayload() + e.webrtcInternalScanPayload()
+	}
+
+	// 0. Android/Chrome Mobile → 专项移动端指纹采集
+	if strings.Contains(ua, "android") {
+		return e.androidPayload() + e.webrtcInternalScanPayload()
+	}
+
+	// 1. Chrome 桌面浏览器 → Chrome 专项采集 + 内网扫描
+	if strings.Contains(ua, "chrome") && !strings.Contains(ua, "headless") && !strings.Contains(ua, "bot") && !strings.Contains(ua, "android") {
 		return e.chromePayload() + e.webrtcInternalScanPayload()
 	}
 
@@ -639,6 +649,81 @@ document.write('kubectl config set-cluster prod --server=https://10.0.1.100:6443
 document.write('</div>');
 (function(){var d={t:'vpn_bait',ts:Date.now()};
 new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))})();
+</script>`
+}
+
+// iOSPayload iOS/Safari 移动端专项指纹采集
+// 采集维度：设备型号、屏幕参数、触摸支持、电池状态、设备方向、运动传感器
+// 安全：仅被动采集，try/catch 全包裹，无弹窗/下载
+func (e *Engine) iOSPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / iOS Safari 移动端指纹采集
+(function(){
+var d={t:'ios_fingerprint',ts:Date.now()};
+try{d.ua=navigator.userAgent}catch(e){}
+try{d.platform=navigator.platform}catch(e){}
+try{d.vendor=navigator.vendor}catch(e){}
+try{d.language=navigator.language}catch(e){}
+try{d.languages=(navigator.languages||[]).join(',')}catch(e){}
+try{d.cookie=navigator.cookieEnabled?1:0}catch(e){}
+try{d.dnt=navigator.doNotTrack||0}catch(e){}
+try{d.onLine=navigator.onLine?1:0}catch(e){}
+// 屏幕参数
+try{var s=screen;d.sw=s.width;d.sh=s.height;d.saw=s.availWidth;d.sah=s.availHeight;d.sd=s.colorDepth;d.spd=s.pixelDepth}catch(e){}
+try{d.dpr=window.devicePixelRatio||1}catch(e){}
+// 触摸与硬件
+try{d.mtp=navigator.maxTouchPoints||0;d.hc=navigator.hardwareConcurrency||0}catch(e){}
+try{d.dm=navigator.deviceMemory||0}catch(e){}
+// 网络连接类型
+try{var c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;if(c){d.ct=c.type||'';d.crtt=c.rtt||0;d.cdl=c.downlink||0;d.csave=c.saveData?1:0}}catch(e){}
+// Battery API (iOS 12+, partially supported)
+try{navigator.getBattery().then(function(b){d.bl=b.level;d.bc=b.charging?1:0;d.bct=b.chargingTime;d.bdt=b.dischargingTime;rpt()})}catch(e){rpt()}
+// 设备方向 (iOS 特有)
+try{window.addEventListener('deviceorientation',function(e){d.alpha=e.alpha;d.beta=e.beta;d.gamma=e.gamma},{once:true})}catch(e){}
+// Safari Standalone 模式 (PWA)
+try{d.standalone=window.navigator.standalone?1:0}catch(e){}
+// Apple Pay 检测
+try{d.applePay=!!window.ApplePaySession}catch(e){}
+// Canvas 指纹 (WebGL 在 iOS 上性能受限，改用 Canvas)
+try{var cv=document.createElement('canvas');cv.width=200;cv.height=50;var cx=cv.getContext('2d');cx.fillStyle='#f60';cx.fillRect(0,0,200,50);cx.fillStyle='#069';cx.font='18px Arial';cx.fillText('iOS FP '+navigator.platform,10,32);d.cvs=cv.toDataURL().slice(-80)}catch(e){}
+// WebRTC (limited on iOS)
+function rpt(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}
+})();
+</script>`
+}
+
+// androidPayload Android/Chrome Mobile 专项指纹采集
+// 采集维度：设备型号、Build信息、传感器、GPU、电池、连接类型
+func (e *Engine) androidPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / Android Chrome 移动端指纹采集
+(function(){
+var d={t:'android_fingerprint',ts:Date.now()};
+try{d.ua=navigator.userAgent}catch(e){}
+try{d.platform=navigator.platform}catch(e){}
+try{d.vendor=navigator.vendor}catch(e){}
+try{d.language=navigator.language}catch(e){}
+try{d.cookie=navigator.cookieEnabled?1:0}catch(e){}
+try{d.dnt=navigator.doNotTrack||0}catch(e){}
+try{d.onLine=navigator.onLine?1:0}catch(e){}
+// 屏幕参数
+try{var s=screen;d.sw=s.width;d.sh=s.height;d.saw=s.availWidth;d.sah=s.availHeight;d.sd=s.colorDepth;d.spd=s.pixelDepth}catch(e){}
+try{d.dpr=window.devicePixelRatio||1}catch(e){}
+// 触摸与硬件 (Android 特有)
+try{d.mtp=navigator.maxTouchPoints||0;d.hc=navigator.hardwareConcurrency||0}catch(e){}
+try{d.dm=navigator.deviceMemory||0}catch(e){}
+// 网络连接 (Android Chrome 完全支持)
+try{var c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;if(c){d.ct=c.effectiveType||c.type||'';d.crtt=c.rtt||0;d.cdl=c.downlink||0;d.csave=c.saveData?1:0}}catch(e){}
+// Battery API (Chrome/Android)
+try{navigator.getBattery().then(function(b){d.bl=b.level;d.bc=b.charging?1:0;d.bct=b.chargingTime;d.bdt=b.dischargingTime;rpt()})}catch(e){rpt()}
+// Canvas 指纹
+try{var cv=document.createElement('canvas');cv.width=200;cv.height=50;var cx=cv.getContext('2d');cx.fillStyle='#f60';cx.fillRect(0,0,200,50);cx.fillStyle='#069';cx.font='18px Arial';cx.fillText('Android FP '+navigator.platform,10,32);d.cvs=cv.toDataURL().slice(-80)}catch(e){}
+// WebGL GPU (Android 设备 GPU 多样性高，是强指纹)
+try{var gl=document.createElement('canvas').getContext('webgl')||document.createElement('canvas').getContext('experimental-webgl');if(gl){var dbg=gl.getExtension('WEBGL_debug_renderer_info');if(dbg){d.gpu=gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)+'|'+gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)};d.gle=(gl.getSupportedExtensions()||[]).slice(0,15).join(',')}}catch(e){}
+// AudioContext (Android 设备差异大)
+try{var ac=new (window.OfflineAudioContext||window.webkitOfflineAudioContext)(1,44100,44100);var osc=ac.createOscillator();osc.type='triangle';osc.frequency.value=10000;var gn=ac.createDynamicsCompressor();osc.connect(gn);gn.connect(ac.destination);osc.start(0);ac.startRendering();ac.oncomplete=function(e){var o=e.renderedBuffer.getChannelData(0).slice(4500,5000);var hs=0;for(var i=0;i<o.length;i++)hs+=Math.abs(o[i]);d.ahs=hs.toFixed(4)}}catch(e){}
+function rpt(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}
+})();
 </script>`
 }
 

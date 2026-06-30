@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/asset"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
@@ -87,6 +88,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/profiles", s.handleProfiles)
 	s.mux.HandleFunc("/api/profiles/stats", s.handleProfileStats)
 	s.mux.HandleFunc("/api/profiles/tags", s.handleProfileTags)
+	// 资产探测
+	s.mux.HandleFunc("/api/assets/scan", s.handleAssetScan)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -547,7 +550,25 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// ---------- 攻击者画像 API ----------
+// ---------- 资产探测 API ----------
+
+func (s *Server) handleAssetScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	// 解析可选的目标主机
+	hosts := []string{"127.0.0.1"}
+	if h := r.URL.Query().Get("host"); h != "" {
+		hosts = strings.Split(h, ",")
+	}
+
+	scanner := asset.NewScanner(hosts)
+	result := scanner.Scan(nil) // 扫描所有已知端口
+
+	writeJSON(w, http.StatusOK, result)
+}
 
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/profiles")

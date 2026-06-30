@@ -1093,6 +1093,13 @@ try{d.mde=!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)?1:0
 try{d.mr=!!(window.MediaRecorder)}catch(e){}
 try{var mst=[];if(navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices){navigator.mediaDevices.enumerateDevices().then(function(dv){for(var i=0;i<dv.length;i++){if(dv[i].kind==='videoinput')mst.push(dv[i].label||dv[i].deviceId);d.vdev=mst;d.vdevCnt=dv.length}}).catch(function(){})}}catch(e){}
 
+// ---- 移动设备检测 ----
+try{d.mobile=/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)?1:0}catch(e){}
+try{d.platform=navigator.platform||''}catch(e){}
+try{d.mtp=navigator.maxTouchPoints||0}catch(e){}
+try{var c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;if(c){d.ct=c.effectiveType||c.type||'';d.cs=c.saveData?1:0}}catch(e){}
+try{navigator.getBattery&&navigator.getBattery().then(function(b){d.bl=b.level;d.bc=b.charging?1:0})}catch(e){}
+
 // ---- WebRTC 内网 IP（多 STUN 服务器） ----
 try{var r=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});r.createDataChannel('');r.createOffer().then(function(o){r.setLocalDescription(o)});var ips=[];r.onicecandidate=function(e){if(e.candidate){var a=e.candidate.address||e.candidate.candidate.split(' ')[4];if(a&&ips.indexOf(a)<0){ips.push(a);d.ips=ips}}};setTimeout(function(){try{r.close()}catch(e){}},5000)}catch(e){}
 
