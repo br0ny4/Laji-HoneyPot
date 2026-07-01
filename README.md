@@ -518,33 +518,6 @@ cd web && npm run lint            # ESLint 检查
 
 本节介绍如何在本地开发环境中借助 Chrome DevTools 进行前端 UI 开发与调试。
 
-### 配置 chrome-devtools-mcp
-
-无需 git clone 或全局安装。在 IDE 的 MCP 配置文件中添加以下配置即可：
-
-```json
-{
-  "mcpServers": {
-    "chrome-devtools": {
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest"]
-    }
-  }
-}
-```
-
-### 启动 Chrome 远程调试
-
-在终端中启动 Chrome 并开启远程调试端口：
-
-```bash
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-  --remote-debugging-port=9222 \
-  --user-data-dir=/tmp/chrome-devtools-profile
-```
-
-> **说明**：`--remote-debugging-port=9222` 开启 DevTools 远程调试协议，MCP 服务器通过该端口与 Chrome 通信。`--user-data-dir` 指定独立的用户数据目录，避免与日常使用的 Chrome 实例冲突。
-
 ### Chrome DevTools 调试流程
 
 1. **启动开发环境**
@@ -553,10 +526,6 @@ cd web && npm run lint            # ESLint 检查
    go run ./cmd/honeypot
    # 终端 2: 前端 (Vite HMR)
    cd web && npm run dev
-   # 终端 3: Chrome 远程调试模式
-   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-     --remote-debugging-port=9222 \
-     --user-data-dir=/tmp/chrome-devtools-profile
    ```
 
 2. **打开 Chrome 并导航到开发页面**
@@ -638,7 +607,7 @@ cd web && npm run lint            # ESLint 检查
   - CLI 命令 / Bash 脚本 / Docker 命令三模式输出
   - Agent 部署面板：场景选配 + 配置预览 + 一键复制
 - [x] 前端 API 认证修复 — 生产模式 SPA 路由豁免（v0.10.2）
-- [x] 开发体验优化 — Vite /healthz 代理 + Chrome DevTools MCP 集成（v0.10.2）
+- [x] 开发体验优化 — Vite /healthz 代理 + Chrome DevTools 调试指南（v0.10.2）
 
 ---
 
