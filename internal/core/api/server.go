@@ -163,9 +163,10 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 // apiKeyMiddleware API Key 认证中间件
 // 仅当配置了 api_key 时才启用。以下端点豁免认证：
-//   - /healthz        （健康检查，无需认证）
+//   - /healthz         （健康检查，无需认证）
 //   - /api/collect     （浏览器指纹采集，由攻击者浏览器触发，不可拦截）
-//   - /api/events       （SSE 实时推送，前端 EventSource 不支持自定义 Header）
+//   - /api/events      （SSE 实时推送，前端 EventSource 不支持自定义 Header）
+//   - 非 /api/ 路径    （前端 SPA 静态资源，浏览器初始加载无法携带 X-API-Key）
 func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 未配置 API Key → 跳过认证
@@ -178,6 +179,12 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 
 		// 豁免端点：健康检查、指纹采集、SSE 推送
 		if path == "/healthz" || strings.HasPrefix(path, "/api/collect") || path == "/api/events" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 豁免前端静态资源：非 /api/ 路径由 SPA handler 处理，浏览器初始加载无法携带 X-API-Key
+		if !strings.HasPrefix(path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}

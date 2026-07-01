@@ -19,9 +19,13 @@
 - [快速开始](#快速开始)
 - [核心特性](#核心特性)
 - [管理后台](#管理后台)
+- [陷阱模块选配](#陷阱模块选配)
+- [Agent 部署](#agent-部署)
 - [测试验证](#测试验证)
 - [漏洞库](#漏洞库)
 - [项目架构](#项目架构)
+- [本地开发环境](#本地开发环境)
+- [Chrome 浏览器调试](#chrome-浏览器调试)
 - [开发路线图](#开发路线图)
 - [同类对比](#同类对比)
 - [致谢](#致谢)
@@ -107,8 +111,8 @@ docker compose up -d
 | 4450 | SMB | Windows SMB 3.1.1 |
 | 33890 | RDP | Windows RDP 10.0 |
 | 8080 | API 管理端 | — |
-
 | 8443 | Cluster | 集群 TLS 端口 (管理端↔节点) |
+
 ---
 
 ## 核心特性
@@ -182,6 +186,89 @@ api_key: "your-custom-key"
 
 以下端点无需认证（面向攻击者指纹回传）：`/healthz`、`/api/collect`、`/api/events`
 
+---
+
+## 陷阱模块选配
+
+蜜罐 Agent 支持陷阱功能的模块化选配，用户可根据部署场景自主选择开启对应陷阱，无需默认启用全部诱捕陷阱。
+
+### 部署场景
+
+| 场景 | 启用服务 | 适用环境 |
+|------|---------|---------|
+| `web` | HTTP | Web 业务场景 — 面包屑引流 + 浏览器指纹 + 反制载荷 |
+| `database` | MySQL, Redis | 数据库场景 — 捕获 SQL 注入/未授权访问 |
+| `remote_access` | SSH, RDP, FTP | 主机远程访问场景 — 捕获暴力破解/横向移动 |
+| `infrastructure` | DNS, LDAP, SMB | 基础设施场景 — 捕获扫描探测 |
+| `full` | 全部 9 种 | 全量部署（默认模式，向后兼容） |
+| `custom` | 手动选择 | 自定义选配 — 配合 `custom_services` 精准控制 |
+
+### 配置方式
+
+编辑 `config.yaml` 中的 `honeypot-engine` 段：
+
+```yaml
+honeypot-engine:
+  enabled: true
+  trap_scenario: "web"    # 改为 web / database / remote_access / infrastructure / full / custom
+  # 自定义选配 (仅 trap_scenario=custom 时生效)
+  # custom_services:
+  #   - http
+  #   - mysql
+  #   - ssh
+```
+
+### 验证
+
+```bash
+# 启动后查看启用的服务列表
+curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/traps/config
+# {"current_scenario":"web","enabled_services":["http"],"all_services":[...]}
+```
+
+**设计原则**：未选配的陷阱不会监听端口，不产生无效资源占用。HTTP 蜜罐未启用时，面包屑路径和反制载荷均不会生效。
+
+---
+
+## Agent 部署
+
+在 Management Node 平台上一键生成 Agent 配置与部署命令，支持两种部署路径：
+
+### 部署方式
+
+**方式一：前端手动部署**
+
+1. 打开管理面板 → "Agent部署" Tab
+2. 填写 / 自动检测管理端地址
+3. 选择陷阱场景（Web/数据库/主机/基础设施）
+4. 选择二进制获取方式（Release 预编译 / 源码编译 / 自定义 URL）
+5. 点击"生成 Agent 部署命令"
+6. 在 CLI / 部署脚本 / config.yaml 三 Tab 中复制对应命令
+7. 在目标主机上执行命令完成部署
+
+**方式二：命令行直接部署**
+
+生成的 CLI 命令示例（Web 场景）：
+
+```bash
+curl -sSL https://github.com/br0ny4/Laji-HoneyPot/releases/latest/download/honeypot-linux-amd64 \
+  -o honeypot && chmod +x honeypot && mkdir -p data && cat > config.yaml <<'HPEOF'
+# --- 自动生成的 Agent 配置（含 manager_addr）---
+HPEOF
+./honeypot
+```
+
+### 注册校验
+
+Agent 部署后将在管理端"集群管理"面板自动上线，心跳周期 30 秒。可通过以下方式验证：
+
+```bash
+# 查看集群节点列表
+curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8443/api/cluster/nodes
+# 检查 Agent 日志
+tail -f data/honeypot.log | grep "registered"
+```
+
 ### 功能模块
 
 | 标签页 | 功能 | 数据来源 |
@@ -192,11 +279,16 @@ api_key: "your-custom-key"
 | 指纹采集 | 浏览器指纹详情（Canvas/GPU/屏幕/时区） | `/api/fingerprints` |
 | 反制日志 | 反制部署记录 + 效果追踪 + 载荷详情 | `/api/countermeasures` |
 | 资产台账 | 攻击者 IP 汇总 + 端口扫描 + 服务清单（风险评级/Banner识别） | `/api/attackers` + `/api/assets/scan` |
-| 端口扫描 | 端口扫描感知记录 | `/api/portscans` |
+| 集群管理 | 分布式节点监控 + 在线状态 + Agent 部署指引 | `/api/cluster/nodes` |
+| **Agent 部署** | **Management Node 一键生成 Agent 配置与部署命令** | `/api/cluster/agent/generate` |
+| **陷阱选配** | **场景化陷阱模块选配（Web/数据库/主机/基础设施）** | `/api/traps/config` |
 | 运维管理 | 系统状态 + 部署指南 + 性能指标 | `/api/system` + `/api/metrics` |
-| **攻击者画像** | **多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选** | `/api/profiles` + `/api/profiles/stats` |
+| 攻击者画像 | 多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选 | `/api/profiles` + `/api/profiles/stats` |
 
-| **集群管理** | **节点监控 + 在线状态 + 远程部署指引** | `/api/cluster/nodes` |
+### 前端 API 认证修复
+
+生产模式下 Go 后端直接托管前端 SPA 时，`apiKeyMiddleware` 已豁免所有非 `/api/` 开头的路径（如 `/`、`/assets/`），确保浏览器首次加载 HTML/JS/CSS 时不会被 401 拦截。仅对 `/api/` 开头的管理 API 要求 `X-API-Key` 认证。
+
 ### 运行时监控
 
 ```bash
@@ -306,13 +398,14 @@ Laji-HoneyPot/
 │   ├── honeypot/              # 蜜罐引擎
 │   │   ├── tcpstack/          # 自研 TCP 协议栈
 │   │   ├── services/          # 9 大协议仿真 (HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP)
+│   │   ├── traps/             # 陷阱模块注册中心 (场景化选配)
 │   │   └── manager/           # 容器安全管理
 │   ├── traceability/          # 溯源反制引擎
 │   │   ├── vulndb/            # 漏洞数据库 & NVD 爬虫
 │   │   ├── fingerprint/       # 攻击者指纹采集
 │   │   └── payload/           # Payload 生成与投递
 │   ├── asset/                 # 资产探测模块 (端口扫描/服务识别/Banner抓取)
-│   ├── cluster/               # 分布式集群 (管理端/节点代理/TLS通信)
+│   ├── cluster/               # 分布式集群 (管理端/节点代理/TLS通信/Agent生成器)
 │   ├── alerter/               # 多通道告警 (Webhook/钉钉/飞书)
 │   └── ops/                   # 运维引擎 (GitHub同步/竞品调研)
 ├── web/                       # React 18 管理面板
@@ -331,6 +424,167 @@ Laji-HoneyPot/
 | 前端 | React 18 + TypeScript + Vite 5 |
 | 容器 | Docker + Docker Compose |
 | CI/CD | GitHub Actions |
+
+---
+
+## 本地开发环境
+
+### 前置依赖
+
+| 工具 | 版本 | 用途 |
+|------|------|------|
+| Go | 1.22+ | 后端编译与运行 |
+| Node.js | 18+ | 前端构建 (`npm run build`) |
+| npm | 9+ | 前端依赖管理 |
+| Git | 任意 | 版本控制 |
+| Chrome | 120+ | 浏览器调试（DevTools） |
+
+### 开发模式启动
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/br0ny4/Laji-HoneyPot.git
+cd Laji-HoneyPot
+
+# 2. 启动后端（带热重载：修改代码后 go install + 重启）
+cd cmd/honeypot && go install && cd ../..
+# 或使用 air 热重载工具：
+# go install github.com/air-verse/air@latest && air
+
+# 3. 终端 2 — 启动前端 Vite 开发服务器
+cd web
+npm install
+npm run dev
+# → http://127.0.0.1:3000 （HMR 热更新）
+
+# 4. 浏览器打开 http://127.0.0.1:3000
+```
+
+### 开发模式架构
+
+```
+浏览器 (localhost:3000)
+  ├── /api/*      → Vite Proxy → Go Backend (localhost:8080)
+  ├── /healthz    → Vite Proxy → Go Backend (localhost:8080)
+  └── /*          → Vite HMR 前端资源
+```
+
+> **注意**：开发模式使用 Vite 代理转发 API 请求，无需在浏览器中携带 `X-API-Key`（前端 `apiFetch` 自动附加）。生产模式使用 Go 后端直接托管前端静态文件，`apiKeyMiddleware` 已豁免非 `/api/` 路径。
+
+### 目录结构
+
+```
+project-root/
+├── cmd/honeypot/main.go     # 后端入口
+├── internal/                # Go 业务逻辑
+│   ├── core/                # 微内核
+│   ├── honeypot/            # 蜜罐引擎 + 陷阱注册中心
+│   ├── traceability/        # 溯源引擎
+│   ├── cluster/             # 集群 + Agent 生成器
+│   └── ...
+├── web/                     # React 前端
+│   ├── src/
+│   │   ├── components/      # UI 组件
+│   │   │   ├── AgentDeployPanel.tsx  # Agent 部署面板
+│   │   │   ├── TrapConfigPanel.tsx   # 陷阱选配面板
+│   │   │   └── ...
+│   │   ├── api.ts           # API 封装
+│   │   ├── App.tsx          # 主路由
+│   │   └── App.css          # 全局样式
+│   ├── vite.config.ts       # Vite 配置（含代理）
+│   └── package.json
+├── config.yaml              # 主配置文件
+└── data/                    # SQLite 数据库 + 日志
+```
+
+### 常用开发命令
+
+```bash
+# 后端
+go build ./...                    # 编译检查
+go test ./... -count=1            # 全量测试
+go test ./internal/cluster/... -v # 集群模块测试
+go vet ./...                      # 静态分析
+
+# 前端
+cd web && npm run dev             # Vite 开发服务器
+cd web && npm run build           # 生产构建
+cd web && npm run lint            # ESLint 检查
+```
+
+---
+
+## Chrome 浏览器调试
+
+本节介绍如何在本地开发环境中借助 Chrome DevTools 进行前端 UI 开发与调试。
+
+### 安装 chrome-devtools-mcp
+
+```bash
+# 全局安装 MCP 服务器
+npm install -g @anthropic-ai/chrome-devtools-mcp
+
+# 或通过 npx 直接使用（无需安装）
+npx @anthropic-ai/chrome-devtools-mcp
+```
+
+### 配置 MCP
+
+在 IDE 的 MCP 设置中添加 Chrome DevTools MCP 服务器配置：
+
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/chrome-devtools-mcp"]
+    }
+  }
+}
+```
+
+### Chrome DevTools 调试流程
+
+1. **启动开发环境**
+   ```bash
+   # 终端 1: 后端
+   go run ./cmd/honeypot
+   # 终端 2: 前端 (Vite HMR)
+   cd web && npm run dev
+   ```
+
+2. **打开 Chrome 并导航到开发页面**
+   - 打开 Chrome 浏览器
+   - 访问 `http://127.0.0.1:3000`
+   - 按 `F12` 或 `Cmd+Option+I` 打开 DevTools
+
+3. **实时预览与调试**
+   - **Elements 面板**：检查 DOM 结构和 CSS 样式
+   - **Console 面板**：查看日志输出、API 请求结果
+   - **Network 面板**：监控 API 请求/响应（过滤 `/api/`）
+   - **Application 面板**：检查 localState、IndexedDB
+   - **Performance 面板**：录制页面加载性能
+
+4. **前端热重载验证**
+   - 修改 `web/src/` 下的任意 `tsx` 或 `css` 文件
+   - 保存后浏览器自动刷新（HMR 热更新）
+   - DevTools 中的修改可立即预览
+
+5. **验证 API 连通性**
+   - 打开前端页面底部的状态栏
+   - 检查 "API" 指示灯为绿色 → 后端连通
+   - 检查 "SSE" 指示灯为绿色 → 实时推送连通
+   - 点击状态栏展开查看最近 50 条请求日志
+
+### 常见调试场景
+
+| 场景 | DevTools 操作 |
+|------|-------------|
+| 新 Tab 功能正常 | Console 中无报错，Network 中对应 API 返回 200 |
+| 样式异常 | Elements → 选中元素 → Styles 面板排查 CSS |
+| API 请求慢 | Network → 查看请求耗时 → 后端优化 |
+| 数据不刷新 | 检查 SSE 连接状态 → Console 中查看 EventSource 日志 |
+| 前端构建失败 | Terminal 中 `cd web && npm run build` 查看错误详情 |
 
 ---
 
@@ -368,6 +622,17 @@ Laji-HoneyPot/
 - [x] 智能载荷选择扩展到 iOS/Android 指纹（v0.9.7）
 - [x] 资产探测模块 — TCP端口扫描 + 服务识别 + Banner抓取（v0.9.7）
 - [x] 分布式集群架构 — 管理端 + 远程蜜罐节点（v0.10.0）
+- [x] 陷阱模块化选配 — 场景化陷阱选配系统（v0.10.1）
+  - 6 种部署场景：web / database / remote_access / infrastructure / full / custom
+  - TrapRegistry 注册中心 + 前端选配面板 + API 配置端点
+  - 未选配陷阱不监听端口，零资源浪费
+- [x] Agent 生成引擎 — 一键部署与模块选配（v0.10.2）
+  - Management Node 平台生成 Agent 配置与部署命令
+  - 3 种部署方式：Release 预编译 / 源码编译 / 自定义 URL
+  - CLI 命令 / Bash 脚本 / Docker 命令三模式输出
+  - Agent 部署面板：场景选配 + 配置预览 + 一键复制
+- [x] 前端 API 认证修复 — 生产模式 SPA 路由豁免（v0.10.2）
+- [x] 开发体验优化 — Vite /healthz 代理 + Chrome DevTools MCP 集成（v0.10.2）
 
 ---
 
