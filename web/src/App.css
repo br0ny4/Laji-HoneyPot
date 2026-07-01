@@ -1152,3 +1152,228 @@ body {
   text-align: right;
   font-family: monospace;
 }
+
+/* ========== Trap Config Panel ========== */
+.config-section {
+  margin-bottom: 24px;
+}
+.config-section h3 {
+  font-size: 14px;
+  color: #e2e8f0;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.count-badge {
+  font-size: 11px;
+  color: #64748b;
+  background: #1e293b;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.current-scenario-card {
+  background: linear-gradient(135deg, #1e293b, #172554);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scenario-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #0ea5e9;
+  color: #fff;
+  width: fit-content;
+}
+.scenario-desc {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.service-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 14px;
+  transition: all 0.2s;
+}
+.service-card.enabled {
+  border-color: #0ea5e9;
+  background: #172554;
+}
+.service-card.disabled {
+  opacity: 0.5;
+}
+.service-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.online { background: #22c55e; }
+.status-dot.offline { background: #64748b; }
+.service-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.service-desc {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.service-state {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.service-card.enabled .service-state {
+  color: #86efac;
+  background: #052e16;
+}
+.service-card.disabled .service-state {
+  color: #94a3b8;
+  background: #27272a;
+}
+
+.scenario-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.scenario-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 14px;
+}
+.scenario-card.active {
+  border-color: #0ea5e9;
+  background: #172554;
+}
+.scenario-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.scenario-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.tag {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+}
+.tag-current { background: #0ea5e9; color: #fff; }
+.scenario-desc-small {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.scenario-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.svc-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: #27272a;
+  color: #94a3b8;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.flow-info {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 16px;
+}
+.flow-diagram {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.flow-node {
+  padding: 4px 10px;
+  background: #172554;
+  border: 1px solid #0ea5e9;
+  border-radius: 4px;
+  color: #93c5fd;
+  font-weight: 500;
+}
+.flow-arrow {
+  color: #64748b;
+  font-size: 14px;
+}
+.flow-note {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.6;
+}
+.flow-note strong {
+  color: #94a3b8;
+}
+.flow-note p {
+  margin-bottom: 6px;
+}
+
+.config-guide {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 14px;
+}
+.config-guide p {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+.config-guide code {
+  background: #0f172a;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #38bdf8;
+}
+.code-block {
+  background: #0f172a;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #e2e8f0;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.5;
+}

@@ -24,6 +24,7 @@ import (
 	smbSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/smb"
 	sshSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ssh"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/tcpstack"
+	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	"github.com/Laji-HoneyPot/honeypot/internal/plugin"
 )
 
@@ -36,6 +37,7 @@ type Engine struct {
 	stack            *tcpstack.Stack
 	udpListener      net.PacketConn
 	activeSvcs       int
+	trapRegistry     *traps.Registry                               // 陷阱模块注册中心（场景化选配）
 	httpSrv          *httpSvc.Server                               // HTTP 蜜罐实例
 	countermeasureFn func(path, userAgent, remoteIP string) string // 面包屑触发的反制 JS 注入回调
 	scanMu           sync.Mutex
@@ -71,35 +73,57 @@ func (e *Engine) Version() string { return "0.4.0" }
 func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("honeypot engine initializing")
 
-	httpSrv := httpSvc.New(e.logger, e.store)
-	e.httpSrv = httpSrv
+	// 初始化陷阱模块注册中心（场景化选配）
+	scenario := traps.ParseScenario(cfg.Get("trap_scenario"))
+	customSvcs := parseStringSlice(cfg, "custom_services")
+	e.trapRegistry = traps.New(scenario, customSvcs)
+	e.logger.Infow("trap registry initialized",
+		"scenario", e.trapRegistry.Scenario,
+		"enabled_services", e.trapRegistry.EnabledServices(),
+	)
 
-	// 加载自定义 HTTP 响应模板（YAML 配置驱动，无需改代码即可添加蜜罐页面）
-	if tmpls := parseCustomTemplates(cfg); len(tmpls) > 0 {
-		httpSrv.SetCustomTemplates(tmpls)
-		e.logger.Infow("custom http templates loaded", "count", len(tmpls))
+	// HTTP 蜜罐（仅在场景启用时创建）
+	var httpSrv *httpSvc.Server
+	if e.trapRegistry.IsHTTPEnabled() {
+		httpSrv = httpSvc.New(e.logger, e.store)
+		e.httpSrv = httpSrv
+
+		// 加载自定义 HTTP 响应模板（YAML 配置驱动，无需改代码即可添加蜜罐页面）
+		if tmpls := parseCustomTemplates(cfg); len(tmpls) > 0 {
+			httpSrv.SetCustomTemplates(tmpls)
+			e.logger.Infow("custom http templates loaded", "count", len(tmpls))
+		}
 	}
 
+	// 数据库蜜罐（按场景选配）
 	mysqlSrv := mysqlSvc.New(e.logger)
 	mysqlSrv.SetBus(e.bus)
 	redisSrv := redisSvc.New(e.logger)
 	redisSrv.SetBus(e.bus)
+
+	// 远程访问蜜罐（按场景选配）
 	sshSrv := sshSvc.New(e.logger)
 	sshSrv.SetBus(e.bus)
 	ftpSrv := ftpSvc.New(e.logger)
 	ftpSrv.SetBus(e.bus)
-	ldapSrv := ldapSvc.New(e.logger)
-	smbSrv := smbSvc.New(e.logger)
 	rdpSrv := rdpSvc.New(e.logger)
 
-	// TCP 服务
+	// 基础设施蜜罐（按场景选配）
+	ldapSrv := ldapSvc.New(e.logger)
+	smbSrv := smbSvc.New(e.logger)
+
+	// TCP 服务（通过陷阱注册中心过滤：仅启动场景选配的服务）
 	tcpPorts := []struct {
 		port    int
 		name    string
 		handler func(net.Conn)
 	}{
 		{port: cfg.GetInt("http_port"), name: "HTTP",
-			handler: e.wrapHandler("HTTP", func(c net.Conn) { httpSrv.Handle(c, e.onBreadcrumb) })},
+			handler: e.wrapHandler("HTTP", func(c net.Conn) {
+				if httpSrv != nil {
+					httpSrv.Handle(c, e.onBreadcrumb)
+				}
+			})},
 		{port: cfg.GetInt("mysql_port"), name: "MySQL",
 			handler: e.wrapHandler("MySQL", func(c net.Conn) { mysqlSrv.Handle(c) })},
 		{port: cfg.GetInt("redis_port"), name: "Redis",
@@ -117,6 +141,11 @@ func (e *Engine) Init(cfg config.Section) error {
 	}
 
 	for _, s := range tcpPorts {
+		// 通过陷阱注册中心判断该服务是否在当前场景下启用
+		if !e.trapRegistry.IsServiceEnabled(strings.ToLower(s.name)) {
+			e.logger.Infow("service disabled by trap scenario", "name", s.name, "scenario", e.trapRegistry.Scenario)
+			continue
+		}
 		if s.port <= 0 {
 			continue
 		}
@@ -127,22 +156,27 @@ func (e *Engine) Init(cfg config.Section) error {
 		e.activeSvcs++
 	}
 
-	// DNS 使用 UDP
-	if dnsPort := cfg.GetInt("dns_port"); dnsPort > 0 {
-		dnsSrv := dnsSvc.New(e.logger)
-		addr := fmt.Sprintf(":%d", dnsPort)
-		pc, err := net.ListenPacket("udp", addr)
-		if err != nil {
-			e.logger.Warnw("failed to start dns udp", "port", dnsPort, "error", err)
-		} else {
-			e.udpListener = pc
-			e.activeSvcs++
-			go e.udpLoop(pc, func(c net.Conn) { dnsSrv.Handle(c) }, dnsPort)
-			e.logger.Infow("dns honeypot listening", "port", dnsPort, "proto", "udp")
+	// DNS 使用 UDP（按场景选配）
+	if e.trapRegistry.IsServiceEnabled("dns") {
+		if dnsPort := cfg.GetInt("dns_port"); dnsPort > 0 {
+			dnsSrv := dnsSvc.New(e.logger)
+			addr := fmt.Sprintf(":%d", dnsPort)
+			pc, err := net.ListenPacket("udp", addr)
+			if err != nil {
+				e.logger.Warnw("failed to start dns udp", "port", dnsPort, "error", err)
+			} else {
+				e.udpListener = pc
+				e.activeSvcs++
+				go e.udpLoop(pc, func(c net.Conn) { dnsSrv.Handle(c) }, dnsPort)
+				e.logger.Infow("dns honeypot listening", "port", dnsPort, "proto", "udp")
+			}
 		}
 	}
 
-	e.logger.Infow("honeypot engine initialized", "active_services", e.activeSvcs)
+	e.logger.Infow("honeypot engine initialized",
+		"active_services", e.activeSvcs,
+		"scenario", e.trapRegistry.Scenario,
+	)
 	return nil
 }
 
@@ -513,6 +547,11 @@ func (e *Engine) Stop() error {
 	return nil
 }
 
+// GetTrapRegistry 暴露陷阱注册中心（供溯源引擎查询场景信息）
+func (e *Engine) GetTrapRegistry() *traps.Registry {
+	return e.trapRegistry
+}
+
 // parseCustomTemplates 从配置中解析自定义 HTTP 响应模板
 func parseCustomTemplates(cfg config.Section) []httpSvc.CustomTemplate {
 	raw, ok := cfg["custom_templates"]
@@ -556,4 +595,23 @@ func parseCustomTemplates(cfg config.Section) []httpSvc.CustomTemplate {
 		}
 	}
 	return templates
+}
+
+// parseStringSlice 从配置 Section 中解析字符串数组（如 custom_services）
+func parseStringSlice(cfg config.Section, key string) []string {
+	raw, ok := cfg[key]
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(list))
+	for _, item := range list {
+		if s, ok := item.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
 }

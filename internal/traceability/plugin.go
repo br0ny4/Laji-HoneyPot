@@ -9,6 +9,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
+	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	"github.com/Laji-HoneyPot/honeypot/internal/plugin"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/fingerprint"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/payload"
@@ -24,8 +25,9 @@ type Engine struct {
 	crawler        *vulndb.NVDCrawler
 	collector      *fingerprint.Collector
 	payloadGen     *payload.Generator
-	updateInterval time.Duration // NVD 爬虫定期更新间隔，0 表示不启用定期更新
-	stopCh         chan struct{} // 停止定期更新的信号
+	trapRegistry   *traps.Registry // 陷阱注册中心（场景化选配，可选）
+	updateInterval time.Duration   // NVD 爬虫定期更新间隔，0 表示不启用定期更新
+	stopCh         chan struct{}   // 停止定期更新的信号
 }
 
 // NewEngine 创建溯源反制引擎
@@ -190,6 +192,12 @@ func (e *Engine) GetCollector() *fingerprint.Collector { return e.collector }
 // GetPayloadGen 暴露 Payload 生成器
 func (e *Engine) GetPayloadGen() *payload.Generator { return e.payloadGen }
 
+// SetTrapRegistry 设置陷阱注册中心（由 honeypot 引擎注入）
+// 用于场景化过滤反制载荷：仅在 HTTP 蜜罐启用时生成浏览器 payload
+func (e *Engine) SetTrapRegistry(reg *traps.Registry) {
+	e.trapRegistry = reg
+}
+
 // BehinderDecoyPage 返回冰蝎 Java JSP 反制诱饵页面
 func (e *Engine) BehinderDecoyPage() string {
 	return e.payloadGen.GenerateBehinderDecoy()
@@ -210,6 +218,11 @@ func (e *Engine) BehinderDecoyPage() string {
 //
 // 10. 默认 → 增强通用指纹采集
 func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
+	// 场景化过滤：若非 HTTP 场景，不生成任何浏览器反制载荷
+	if e.trapRegistry != nil && !e.trapRegistry.IsHTTPEnabled() {
+		return ""
+	}
+
 	ua := strings.ToLower(userAgent)
 
 	// 0. iOS/Safari 移动设备 → 专项移动端指纹采集

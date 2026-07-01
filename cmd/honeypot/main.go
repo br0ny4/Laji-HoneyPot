@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/registry"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 	honeypotEngine "github.com/Laji-HoneyPot/honeypot/internal/honeypot"
+	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	opsEngine "github.com/Laji-HoneyPot/honeypot/internal/ops"
 	traceEngine "github.com/Laji-HoneyPot/honeypot/internal/traceability"
 )
@@ -69,6 +71,9 @@ func main() {
 		return trEngine.SelectPayload(path, userAgent, remoteIP)
 	})
 
+	// 注入陷阱注册中心到溯源引擎：场景化过滤反制载荷（非 HTTP 场景不生成浏览器 payload）
+	trEngine.SetTrapRegistry(hpEngine.GetTrapRegistry())
+
 	// 诱饵页面回调：JSP/Java 端点返回冰蝎反制诱饵
 	hpEngine.SetDecoyPageProvider(func(decoyType, path string) string {
 		if decoyType == "behinder" {
@@ -117,6 +122,11 @@ func main() {
 	}
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, cfg.APIKey)
+
+	// 注入陷阱配置到 API 服务器（供前端 /api/traps/config 查询）
+	if trapData := buildTrapConfigJSON(hpEngine.GetTrapRegistry()); trapData != nil {
+		apiSrv.SetTrapConfig(trapData)
+	}
 
 	// 集群管理端 (仅在 role=manager 且 enabled=true 时启动)
 	var clusterMgr *cluster.Manager
@@ -167,4 +177,18 @@ func main() {
 
 	reg.StopAll()
 	logger.Info("Laji-HoneyPot stopped")
+}
+
+// buildTrapConfigJSON 构建陷阱配置 JSON（供 API 端点和前端渲染）
+func buildTrapConfigJSON(reg *traps.Registry) []byte {
+	if reg == nil {
+		return nil
+	}
+	data, _ := json.Marshal(map[string]interface{}{
+		"scenarios":        traps.GetScenarioInfo(),
+		"current_scenario": reg.Scenario,
+		"enabled_services": reg.EnabledServices(),
+		"all_services":     traps.AllServices,
+	})
+	return data
 }

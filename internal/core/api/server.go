@@ -28,6 +28,7 @@ type Server struct {
 	wsHub           *WSHub
 	profileEngine   *profile.Engine
 	clusterMgr      *cluster.Manager // 集群管理端 (可选)
+	trapConfigData  []byte           // 陷阱配置 JSON 缓存（启动时写入，只读）
 	mux             *http.ServeMux
 	apiKey          string // 管理后台认证密钥，空则不启用
 	startTime       time.Time
@@ -58,6 +59,11 @@ func (s *Server) SetFrontendHandler(h http.Handler) {
 // SetClusterManager 设置集群管理端（由 main 注入）
 func (s *Server) SetClusterManager(mgr *cluster.Manager) {
 	s.clusterMgr = mgr
+}
+
+// SetTrapConfig 设置陷阱配置数据（由 main 在启动时注入，用于 /api/traps/config 接口）
+func (s *Server) SetTrapConfig(data []byte) {
+	s.trapConfigData = data
 }
 
 func (s *Server) registerRoutes() {
@@ -99,6 +105,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/assets/scan", s.handleAssetScan)
 	// 集群节点
 	s.mux.HandleFunc("/api/cluster/nodes", s.handleClusterNodes)
+	// 陷阱配置
+	s.mux.HandleFunc("/api/traps/config", s.handleTrapConfig)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -672,4 +680,16 @@ func (s *Server) handleProfileTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"categories": profile.TagCategories,
 	})
+}
+
+// handleTrapConfig 返回当前陷阱场景配置（GET /api/traps/config）
+func (s *Server) handleTrapConfig(w http.ResponseWriter, r *http.Request) {
+	if s.trapConfigData == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"error": "trap config not available",
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(s.trapConfigData)
 }

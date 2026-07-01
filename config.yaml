@@ -8,6 +8,19 @@ api_key: "hp-admin-2024"
 plugins:
   honeypot-engine:
     enabled: true
+    # 陷阱场景选配 — 根据部署场景选择启用的蜜罐服务，无需默认启用全部陷阱
+    # web:           Web 业务场景（仅 HTTP 蜜罐 + 浏览器反制载荷）
+    # database:      数据库场景（MySQL + Redis 蜜罐）
+    # remote_access: 主机远程访问场景（SSH + RDP + FTP 蜜罐）
+    # infrastructure: 基础设施场景（DNS + LDAP + SMB 蜜罐）
+    # full:          全量启用（默认，向后兼容）
+    # custom:        自定义选配（配合 custom_services 手动选择）
+    trap_scenario: "full"
+    # 自定义选配服务列表（仅 trap_scenario=custom 时生效）
+    # custom_services:
+    #   - http
+    #   - mysql
+    #   - ssh
     http_port: 8081
     mysql_port: 3306
     redis_port: 6379
