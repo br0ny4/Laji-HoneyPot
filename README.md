@@ -108,6 +108,7 @@ docker compose up -d
 | 33890 | RDP | Windows RDP 10.0 |
 | 8080 | API 管理端 | — |
 
+| 8443 | Cluster | 集群 TLS 端口 (管理端↔节点) |
 ---
 
 ## 核心特性
@@ -195,6 +196,7 @@ api_key: "your-custom-key"
 | 运维管理 | 系统状态 + 部署指南 + 性能指标 | `/api/system` + `/api/metrics` |
 | **攻击者画像** | **多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选** | `/api/profiles` + `/api/profiles/stats` |
 
+| **集群管理** | **节点监控 + 在线状态 + 远程部署指引** | `/api/cluster/nodes` |
 ### 运行时监控
 
 ```bash
@@ -310,6 +312,7 @@ Laji-HoneyPot/
 │   │   ├── fingerprint/       # 攻击者指纹采集
 │   │   └── payload/           # Payload 生成与投递
 │   ├── asset/                 # 资产探测模块 (端口扫描/服务识别/Banner抓取)
+│   ├── cluster/               # 分布式集群 (管理端/节点代理/TLS通信)
 │   ├── alerter/               # 多通道告警 (Webhook/钉钉/飞书)
 │   └── ops/                   # 运维引擎 (GitHub同步/竞品调研)
 ├── web/                       # React 18 管理面板
@@ -364,7 +367,7 @@ Laji-HoneyPot/
 - [x] VulnDB 7->17条（新增Log4Shell/SpringGateway/Apache路径穿越/截屏劫持等）
 - [x] 智能载荷选择扩展到 iOS/Android 指纹（v0.9.7）
 - [x] 资产探测模块 — TCP端口扫描 + 服务识别 + Banner抓取（v0.9.7）
-- [ ] 分布式集群架构（管理端 + 远程蜜罐节点）
+- [x] 分布式集群架构 — 管理端 + 远程蜜罐节点（v0.10.0）
 
 ---
 

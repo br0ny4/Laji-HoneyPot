@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/asset"
+	"github.com/Laji-HoneyPot/honeypot/internal/cluster"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
@@ -26,6 +27,7 @@ type Server struct {
 	vulnDB          *vulndb.DB
 	wsHub           *WSHub
 	profileEngine   *profile.Engine
+	clusterMgr      *cluster.Manager // 集群管理端 (可选)
 	mux             *http.ServeMux
 	apiKey          string // 管理后台认证密钥，空则不启用
 	startTime       time.Time
@@ -51,6 +53,11 @@ func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, 
 // SetFrontendHandler 设置前端静态文件 handler（由 go:embed 提供）
 func (s *Server) SetFrontendHandler(h http.Handler) {
 	s.frontendHandler = h
+}
+
+// SetClusterManager 设置集群管理端（由 main 注入）
+func (s *Server) SetClusterManager(mgr *cluster.Manager) {
+	s.clusterMgr = mgr
 }
 
 func (s *Server) registerRoutes() {
@@ -90,6 +97,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/profiles/tags", s.handleProfileTags)
 	// 资产探测
 	s.mux.HandleFunc("/api/assets/scan", s.handleAssetScan)
+	// 集群节点
+	s.mux.HandleFunc("/api/cluster/nodes", s.handleClusterNodes)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +293,7 @@ func (s *Server) handleFingerprints(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.store.GetDetailedStats()
 	info := map[string]interface{}{
-		"version":    "0.9.0",
+		"version":    "0.10.0",
 		"go_version": "go1.22+",
 		"database":   "SQLite (WAL模式)",
 		"services":   "HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP",
@@ -360,7 +369,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.9.0"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.10.0"})
 }
 
 func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
@@ -568,6 +577,24 @@ func (s *Server) handleAssetScan(w http.ResponseWriter, r *http.Request) {
 	result := scanner.Scan(nil) // 扫描所有已知端口
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleClusterNodes 返回集群节点列表
+func (s *Server) handleClusterNodes(w http.ResponseWriter, r *http.Request) {
+	if s.clusterMgr == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"nodes":           []interface{}{},
+			"total":           0,
+			"cluster_enabled": false,
+		})
+		return
+	}
+	nodes := s.clusterMgr.GetNodes()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"nodes":           nodes,
+		"total":           len(nodes),
+		"cluster_enabled": true,
+	})
 }
 
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {

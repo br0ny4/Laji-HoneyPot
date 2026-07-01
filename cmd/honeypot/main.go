@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/alerter"
+	"github.com/Laji-HoneyPot/honeypot/internal/cluster"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/api"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
@@ -31,7 +32,8 @@ func main() {
 	logger := log.New(cfg.LogLevel)
 	eventBus := bus.New()
 
-	logger.Info("Laji-HoneyPot starting", "version", "0.9.0")
+	const version = "0.10.0"
+	logger.Info("Laji-HoneyPot starting", "version", version)
 
 	st, err := store.New(cfg.DataDir)
 	if err != nil {
@@ -115,6 +117,18 @@ func main() {
 	}
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, cfg.APIKey)
+
+	// 集群管理端 (仅在 role=manager 且 enabled=true 时启动)
+	var clusterMgr *cluster.Manager
+	if cfg.Cluster.Enabled && cfg.Cluster.Role == "manager" {
+		clusterMgr = cluster.NewManager(logger, nil) // TLS 配置后续从 cert 文件加载
+		if err := clusterMgr.Listen(cfg.Cluster.ListenAddr); err != nil {
+			logger.Errorw("cluster manager listen failed", "error", err)
+		} else {
+			apiSrv.SetClusterManager(clusterMgr)
+			logger.Infow("cluster manager started", "listen", cfg.Cluster.ListenAddr)
+		}
+	}
 
 	// 前端 SPA 静态文件服务（从 web/dist/ 或 web/ 目录加载）
 	if fh := getFrontendFS("."); fh != nil {

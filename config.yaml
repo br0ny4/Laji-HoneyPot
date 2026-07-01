@@ -71,6 +71,17 @@ plugins:
   ops-engine:
     enabled: true
 
+# 集群配置（可选，默认关闭）
+# 管理节点开启后，远程蜜罐节点可通过 TLS 连接上报数据
+cluster:
+  enabled: false        # 是否启用集群模式
+  role: "manager"       # 本节点角色: manager(管理端) | node(蜜罐节点)
+  listen_addr: "0.0.0.0:8443"   # 管理端监听地址 (role=manager 时生效)
+  manager_addr: ""      # 管理端地址 (role=node 时生效，如 "10.0.0.1:8443")
+  cert_file: ""         # TLS 证书路径 (留空则自动生成自签名证书，仅测试用)
+  key_file: ""          # TLS 私钥路径
+  ca_file: ""           # CA 证书路径 (留空则不验证客户端证书)
+
 # 告警通道配置（可选，不配置则不启用告警）
 alerts:
   # 通用 Webhook（JSON POST 到指定 URL）

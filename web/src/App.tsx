@@ -7,10 +7,11 @@ import CountermeasurePanel from './components/CountermeasurePanel';
 import AssetLedger from './components/AssetLedger';
 import OpsPanel from './components/OpsPanel';
 import AttackerProfilePanel from './components/AttackerProfilePanel';
+import ClusterPanel from './components/ClusterPanel';
 import StatusBar from './components/StatusBar';
 import './App.css';
 
-type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'ops' | 'profiles';
+type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'ops' | 'profiles';
 
 interface TabDef {
   key: Tab;
@@ -25,6 +26,7 @@ const tabs: TabDef[] = [
   { key: 'fingerprints', label: '溯源反制', icon: '' },
   { key: 'countermeasures', label: '反制日志', icon: '' },
   { key: 'assets', label: '资产台账', icon: '' },
+  { key: 'cluster', label: '集群管理', icon: '' },
   { key: 'ops', label: '运维管理', icon: '' },
   { key: 'profiles', label: '攻击者画像', icon: '' },
 ];
@@ -37,7 +39,7 @@ export default function App() {
       <header className="app-header">
         <div className="header-left">
           <h1 className="app-title">Laji-HoneyPot</h1>
-          <span className="app-version">v0.9.0</span>
+          <span className="app-version">v0.10.0</span>
         </div>
         <div className="header-right">
           <span className="status-indicator status-online" />
@@ -65,6 +67,7 @@ export default function App() {
         {activeTab === 'fingerprints' && <FingerprintPanel />}
         {activeTab === 'countermeasures' && <CountermeasurePanel />}
         {activeTab === 'assets' && <AssetLedger />}
+        {activeTab === 'cluster' && <ClusterPanel />}
         {activeTab === 'ops' && <OpsPanel />}
         {activeTab === 'profiles' && <AttackerProfilePanel />}
       </main>

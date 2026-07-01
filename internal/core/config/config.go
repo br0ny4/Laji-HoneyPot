@@ -15,6 +15,17 @@ type AlertChannelConfig struct {
 	EventFilter []string `yaml:"event_filter,omitempty"`
 }
 
+// ClusterConfig 集群配置
+type ClusterConfig struct {
+	Enabled     bool   `yaml:"enabled"`      // 是否启用集群模式
+	Role        string `yaml:"role"`         // 角色: manager | node
+	ListenAddr  string `yaml:"listen_addr"`  // 管理端监听地址
+	ManagerAddr string `yaml:"manager_addr"` // 节点端：管理端地址
+	CertFile    string `yaml:"cert_file"`    // TLS 证书路径
+	KeyFile     string `yaml:"key_file"`     // TLS 私钥路径
+	CAFile      string `yaml:"ca_file"`      // CA 证书路径
+}
+
 // Config 顶层配置结构
 type Config struct {
 	LogLevel      string               `yaml:"log_level"`
@@ -22,6 +33,7 @@ type Config struct {
 	APIAddr       string               `yaml:"api_addr"`
 	DataDir       string               `yaml:"data_dir"`
 	APIKey        string               `yaml:"api_key"`
+	Cluster       ClusterConfig        `yaml:"cluster"`
 	AlertChannels []AlertChannelConfig `yaml:"alerts,omitempty"`
 }
 
