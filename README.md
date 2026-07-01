@@ -518,30 +518,32 @@ cd web && npm run lint            # ESLint 检查
 
 本节介绍如何在本地开发环境中借助 Chrome DevTools 进行前端 UI 开发与调试。
 
-### 安装 chrome-devtools-mcp
+### 配置 chrome-devtools-mcp
 
-```bash
-# 全局安装 MCP 服务器
-npm install -g @anthropic-ai/chrome-devtools-mcp
-
-# 或通过 npx 直接使用（无需安装）
-npx @anthropic-ai/chrome-devtools-mcp
-```
-
-### 配置 MCP
-
-在 IDE 的 MCP 设置中添加 Chrome DevTools MCP 服务器配置：
+无需 git clone 或全局安装。在 IDE 的 MCP 配置文件中添加以下配置即可：
 
 ```json
 {
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/chrome-devtools-mcp"]
+      "args": ["-y", "chrome-devtools-mcp@latest"]
     }
   }
 }
 ```
+
+### 启动 Chrome 远程调试
+
+在终端中启动 Chrome 并开启远程调试端口：
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/chrome-devtools-profile
+```
+
+> **说明**：`--remote-debugging-port=9222` 开启 DevTools 远程调试协议，MCP 服务器通过该端口与 Chrome 通信。`--user-data-dir` 指定独立的用户数据目录，避免与日常使用的 Chrome 实例冲突。
 
 ### Chrome DevTools 调试流程
 
@@ -551,6 +553,10 @@ npx @anthropic-ai/chrome-devtools-mcp
    go run ./cmd/honeypot
    # 终端 2: 前端 (Vite HMR)
    cd web && npm run dev
+   # 终端 3: Chrome 远程调试模式
+   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+     --remote-debugging-port=9222 \
+     --user-data-dir=/tmp/chrome-devtools-profile
    ```
 
 2. **打开 Chrome 并导航到开发页面**
