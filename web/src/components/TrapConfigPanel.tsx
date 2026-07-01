@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 interface ScenarioInfo {
   key: string;
@@ -54,7 +55,7 @@ export default function TrapConfigPanel() {
   const fetchConfig = async () => {
     try {
       setLoading(true);
-      const resp = await fetch('/api/traps/config');
+      const resp = await apiFetch('/api/traps/config');
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
       setConfig(data);

@@ -178,9 +178,10 @@ export default function TopologyGraph() {
       });
 
       // 转换边
-      const g6Edges = topoData.edges.map((e) => {
+      const g6Edges = topoData.edges.map((e, index) => {
         const style = EDGE_STYLES[e.edgeType] || EDGE_STYLES.attack;
         return {
+          id: `${e.source}->${e.target}-${index}`,
           source: e.source,
           target: e.target,
           data: { ...e },

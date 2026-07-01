@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 interface ProfileTag {
   category: string;
@@ -99,8 +100,6 @@ export default function AttackerProfilePanel() {
   const [detailProfile, setDetailProfile] = useState<AttackerProfile | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const apiBase = `${window.location.protocol}//${window.location.hostname}:8080`;
-
   useEffect(() => {
     fetchProfiles();
     fetchStats();
@@ -111,7 +110,7 @@ export default function AttackerProfilePanel() {
     setLoading(true);
     try {
       const params = activeTag ? `?tag=${activeTag}` : '';
-      const res = await fetch(`${apiBase}/api/profiles${params}`);
+      const res = await apiFetch(`/api/profiles${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setProfiles(data.profiles || []);
@@ -124,14 +123,14 @@ export default function AttackerProfilePanel() {
 
   async function fetchStats() {
     try {
-      const res = await fetch(`${apiBase}/api/profiles/stats`);
+      const res = await apiFetch('/api/profiles/stats');
       if (res.ok) setStats(await res.json());
     } catch {}
   }
 
   async function fetchCategories() {
     try {
-      const res = await fetch(`${apiBase}/api/profiles/tags`);
+      const res = await apiFetch('/api/profiles/tags');
       if (res.ok) {
         const data = await res.json();
         setCategories(data.categories || []);
@@ -142,7 +141,7 @@ export default function AttackerProfilePanel() {
   async function fetchProfileDetail(ip: string) {
     setDetailLoading(true);
     try {
-      const res = await fetch(`${apiBase}/api/profiles?ip=${encodeURIComponent(ip)}`);
+      const res = await apiFetch(`/api/profiles?ip=${encodeURIComponent(ip)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setDetailProfile(await res.json());
     } catch (e: any) {
