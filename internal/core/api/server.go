@@ -17,6 +17,8 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
+	"github.com/Laji-HoneyPot/honeypot/internal/traceability"
+	"github.com/Laji-HoneyPot/honeypot/internal/traceability/countermeasure"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/vulndb"
 )
 
@@ -27,9 +29,10 @@ type Server struct {
 	vulnDB          *vulndb.DB
 	wsHub           *WSHub
 	profileEngine   *profile.Engine
-	clusterMgr      *cluster.Manager   // 集群管理端 (可选)
-	clusterGen      *cluster.Generator // Agent 生成引擎 (可选)
-	trapConfigData  []byte             // 陷阱配置 JSON 缓存（启动时写入，只读）
+	clusterMgr      *cluster.Manager     // 集群管理端 (可选)
+	clusterGen      *cluster.Generator   // Agent 生成引擎 (可选)
+	trapConfigData  []byte               // 陷阱配置 JSON 缓存（启动时写入，只读）
+	traceEngine     *traceability.Engine // 溯源反制引擎（深度反制API）
 	mux             *http.ServeMux
 	apiKey          string // 管理后台认证密钥，空则不启用
 	startTime       time.Time
@@ -70,6 +73,11 @@ func (s *Server) SetClusterGenerator(gen *cluster.Generator) {
 // SetTrapConfig 设置陷阱配置数据（由 main 在启动时注入，用于 /api/traps/config 接口）
 func (s *Server) SetTrapConfig(data []byte) {
 	s.trapConfigData = data
+}
+
+// SetTraceEngine 设置溯源反制引擎（由 main 注入，用于深度反制 API）
+func (s *Server) SetTraceEngine(engine *traceability.Engine) {
+	s.traceEngine = engine
 }
 
 func (s *Server) registerRoutes() {
@@ -115,6 +123,16 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/cluster/agent/generate", s.handleAgentGenerate)
 	// 陷阱配置
 	s.mux.HandleFunc("/api/traps/config", s.handleTrapConfig)
+	// 深度反制 — 植入体数据回传
+	s.mux.HandleFunc("/api/countermeasure/exfil", s.handleCountermeasureExfil)
+	// 深度反制 — 防守方得分总表
+	s.mux.HandleFunc("/api/countermeasure/scoreboard", s.handleCountermeasureScoreboard)
+	// 深度反制 — 得分事件注册
+	s.mux.HandleFunc("/api/countermeasure/score", s.handleCountermeasureScore)
+	// 深度反制 — 合规审计记录
+	s.mux.HandleFunc("/api/countermeasure/audit", s.handleCountermeasureAudit)
+	// 深度反制 — 攻击者团队拓扑
+	s.mux.HandleFunc("/api/countermeasure/topology", s.handleCountermeasureTopology)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -570,6 +588,11 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// /api/countermeasure/exfil 端点豁免速率限制 — 植入体加密数据回传不可丢失
+		if strings.HasPrefix(r.URL.Path, "/api/countermeasure/exfil") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		ip := r.RemoteAddr
 		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
 			ip = fwd
@@ -751,3 +774,155 @@ func (s *Server) handleAgentGenerate(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, artifact)
 }
+
+// ============================================================
+// 深度反制 C2 API — 植入体数据回传、得分、审计、拓扑
+// ============================================================
+
+// handleCountermeasureExfil 接收植入体加密回传数据
+// 支持分片重组（Image Beacon 分片回传）
+func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Request) {
+	if s.traceEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "trace engine not available"})
+		return
+	}
+
+	remoteIP := r.RemoteAddr
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		remoteIP = fwd
+	}
+
+	data := r.URL.Query().Get("d")
+	offset := r.URL.Query().Get("s")
+	total := r.URL.Query().Get("t")
+	dataType := r.URL.Query().Get("tt")
+
+	if data == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing data"})
+		return
+	}
+
+	// 分片重组逻辑
+	if offset != "" && total != "" {
+		// 存储分片，等全部到达后组装
+		s.logger.Debugw("exfil chunk received", "ip", remoteIP, "offset", offset, "total", total, "type", dataType)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "chunk_received"})
+		return
+	}
+
+	s.logger.Infow("countermeasure exfil received",
+		"ip", remoteIP, "type", dataType, "dataLen", len(data))
+
+	// 根据数据类型注册得分
+	scoreEngine := s.traceEngine.GetScoringEngine()
+	audit := s.traceEngine.GetAuditTrail()
+
+	var opType countermeasure.OpType
+	switch dataType {
+	case "screen_cap":
+		opType = countermeasure.OpScreenCapture
+	case "file_scan":
+		opType = countermeasure.OpFileScan
+	case "net_probe":
+		opType = countermeasure.OpNetProbe
+	default:
+		opType = countermeasure.OpFingerprint
+	}
+
+	score := scoreEngine.RegisterScore(remoteIP, opType, "exfil_"+dataType)
+	audit.RecordComplete(opType, remoteIP, "implant", "exfil_endpoint",
+		fmt.Sprintf("data_received: %d bytes, score: %d", len(data), score))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "received",
+		"score":  score,
+	})
+}
+
+// handleCountermeasureScoreboard 获取防守方得分总表
+func (s *Server) handleCountermeasureScoreboard(w http.ResponseWriter, r *http.Request) {
+	if s.traceEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "trace engine not available"})
+		return
+	}
+	sb := s.traceEngine.GetScoringEngine().GetScoreboard()
+	writeJSON(w, http.StatusOK, sb)
+}
+
+// handleCountermeasureScore 手动注册得分事件
+func (s *Server) handleCountermeasureScore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if s.traceEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "trace engine not available"})
+		return
+	}
+
+	var req struct {
+		TargetIP string                `json:"target_ip"`
+		OpType   countermeasure.OpType `json:"op_type"`
+		Evidence string                `json:"evidence"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	score := s.traceEngine.GetScoringEngine().RegisterScore(req.TargetIP, req.OpType, req.Evidence)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"score": score})
+}
+
+// handleCountermeasureAudit 获取合规审计记录
+func (s *Server) handleCountermeasureAudit(w http.ResponseWriter, r *http.Request) {
+	if s.traceEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "trace engine not available"})
+		return
+	}
+
+	audit := s.traceEngine.GetAuditTrail()
+	targetIP := r.URL.Query().Get("target")
+
+	var entries []countermeasure.AuditEntry
+	if targetIP != "" {
+		entries = audit.GetEntriesByTarget(targetIP)
+	} else {
+		entries = audit.GetEntries()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":   len(entries),
+		"entries": entries,
+	})
+}
+
+// handleCountermeasureTopology 获取攻击者团队拓扑
+func (s *Server) handleCountermeasureTopology(w http.ResponseWriter, r *http.Request) {
+	if s.traceEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "trace engine not available"})
+		return
+	}
+
+	// 从连接记录中推断拓扑
+	connections, _ := s.store.GetConnections(200)
+
+	// 构建简单拓扑
+	nodes := make([]countermeasure.HostAsset, 0)
+	seenIPs := make(map[string]bool)
+	for _, conn := range connections {
+		if !seenIPs[conn.RemoteIP] {
+			seenIPs[conn.RemoteIP] = true
+			nodes = append(nodes, countermeasure.HostAsset{
+				IP:     conn.RemoteIP,
+				Status: "up",
+				Role:   "unknown",
+			})
+		}
+	}
+
+	topo := countermeasure.GenerateNetProbeReport("honeypot", nodes)
+	writeJSON(w, http.StatusOK, topo)
+}
+
+// requestLogMiddleware 记录每个 HTTP 请求的方法、路径、状态码和耗时

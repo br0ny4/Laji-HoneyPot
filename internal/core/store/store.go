@@ -147,6 +147,76 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_pb_ip ON post_bodies(remote_ip);
 	CREATE INDEX IF NOT EXISTS idx_pb_ts ON post_bodies(timestamp);
+
+	-- 深度反制 — 屏幕截获记录
+	CREATE TABLE IF NOT EXISTS countermeasure_screencaps (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		remote_ip TEXT NOT NULL,
+		resolution TEXT DEFAULT '',
+		format TEXT DEFAULT 'jpeg',
+		data_hash TEXT DEFAULT '',
+		size_bytes INTEGER DEFAULT 0,
+		encrypted INTEGER DEFAULT 1,
+		session_id TEXT DEFAULT '',
+		thumbnail TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_cm_sc_ip ON countermeasure_screencaps(remote_ip);
+
+	-- 深度反制 — 文件扫描结果
+	CREATE TABLE IF NOT EXISTS countermeasure_filescans (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		remote_ip TEXT NOT NULL,
+		file_path TEXT DEFAULT '',
+		file_name TEXT DEFAULT '',
+		file_size INTEGER DEFAULT 0,
+		category TEXT DEFAULT '',
+		sensitive INTEGER DEFAULT 0,
+		content_preview TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_cm_fs_ip ON countermeasure_filescans(remote_ip);
+	CREATE INDEX IF NOT EXISTS idx_cm_fs_cat ON countermeasure_filescans(category);
+
+	-- 深度反制 — 网络探测结果
+	CREATE TABLE IF NOT EXISTS countermeasure_netprobes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		remote_ip TEXT NOT NULL,
+		network_cidr TEXT DEFAULT '',
+		hosts_json TEXT DEFAULT '',
+		hosts_count INTEGER DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_cm_np_ip ON countermeasure_netprobes(remote_ip);
+
+	-- 深度反制 — 合规审计日志
+	CREATE TABLE IF NOT EXISTS countermeasure_audit (
+		id TEXT PRIMARY KEY,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		event_type TEXT NOT NULL,
+		target_ip TEXT NOT NULL,
+		source_ip TEXT DEFAULT '',
+		operator TEXT DEFAULT 'system',
+		action TEXT DEFAULT '',
+		detail TEXT DEFAULT '',
+		compliant INTEGER DEFAULT 1,
+		signature TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_cm_audit_ip ON countermeasure_audit(target_ip);
+	CREATE INDEX IF NOT EXISTS idx_cm_audit_ts ON countermeasure_audit(timestamp);
+
+	-- 深度反制 — 防守方得分记录
+	CREATE TABLE IF NOT EXISTS countermeasure_scores (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		category TEXT NOT NULL,
+		target_ip TEXT NOT NULL,
+		score INTEGER DEFAULT 0,
+		evidence TEXT DEFAULT '',
+		audit_id TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_cm_score_ip ON countermeasure_scores(target_ip);
+	CREATE INDEX IF NOT EXISTS idx_cm_score_cat ON countermeasure_scores(category);
 	`
 	_, err := s.db.Exec(ddl)
 	if err != nil {

