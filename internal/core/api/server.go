@@ -27,8 +27,9 @@ type Server struct {
 	vulnDB          *vulndb.DB
 	wsHub           *WSHub
 	profileEngine   *profile.Engine
-	clusterMgr      *cluster.Manager // 集群管理端 (可选)
-	trapConfigData  []byte           // 陷阱配置 JSON 缓存（启动时写入，只读）
+	clusterMgr      *cluster.Manager   // 集群管理端 (可选)
+	clusterGen      *cluster.Generator // Agent 生成引擎 (可选)
+	trapConfigData  []byte             // 陷阱配置 JSON 缓存（启动时写入，只读）
 	mux             *http.ServeMux
 	apiKey          string // 管理后台认证密钥，空则不启用
 	startTime       time.Time
@@ -59,6 +60,11 @@ func (s *Server) SetFrontendHandler(h http.Handler) {
 // SetClusterManager 设置集群管理端（由 main 注入）
 func (s *Server) SetClusterManager(mgr *cluster.Manager) {
 	s.clusterMgr = mgr
+}
+
+// SetClusterGenerator 设置 Agent 生成引擎（由 main 注入）
+func (s *Server) SetClusterGenerator(gen *cluster.Generator) {
+	s.clusterGen = gen
 }
 
 // SetTrapConfig 设置陷阱配置数据（由 main 在启动时注入，用于 /api/traps/config 接口）
@@ -105,6 +111,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/assets/scan", s.handleAssetScan)
 	// 集群节点
 	s.mux.HandleFunc("/api/cluster/nodes", s.handleClusterNodes)
+	// Agent 生成引擎
+	s.mux.HandleFunc("/api/cluster/agent/generate", s.handleAgentGenerate)
 	// 陷阱配置
 	s.mux.HandleFunc("/api/traps/config", s.handleTrapConfig)
 
@@ -692,4 +700,47 @@ func (s *Server) handleTrapConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(s.trapConfigData)
+}
+
+// handleAgentGenerate 生成 Agent 部署配置与命令（POST /api/cluster/agent/generate）
+// 接收前端提交的场景选配，返回 config.yaml、CLI命令、部署脚本
+func (s *Server) handleAgentGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{
+			"error": "method not allowed, use POST",
+		})
+		return
+	}
+
+	if s.clusterGen == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"error": "agent generator not available",
+			"hint":  "management node must be running in manager role",
+		})
+		return
+	}
+
+	var req cluster.AgentDeployRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error": fmt.Sprintf("invalid request body: %v", err),
+		})
+		return
+	}
+
+	// 如果未提供 manager_addr，自动填写当前 Management Node 地址
+	if req.ManagerAddr == "" && s.clusterMgr != nil {
+		// 从集群配置推断管理端地址（由前端传入或使用默认值）
+		// 此时由前端负责检测管理端地址，后端仅做兜底
+	}
+
+	artifact, err := s.clusterGen.Generate(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, artifact)
 }

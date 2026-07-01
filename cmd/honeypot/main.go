@@ -130,6 +130,9 @@ func main() {
 
 	// 集群管理端 (仅在 role=manager 且 enabled=true 时启动)
 	var clusterMgr *cluster.Manager
+	clusterGen := cluster.NewGenerator(version)
+	apiSrv.SetClusterGenerator(clusterGen) // Generator 始终可用（前端需 manager mode 才可部署）
+
 	if cfg.Cluster.Enabled && cfg.Cluster.Role == "manager" {
 		clusterMgr = cluster.NewManager(logger, nil) // TLS 配置后续从 cert 文件加载
 		if err := clusterMgr.Listen(cfg.Cluster.ListenAddr); err != nil {

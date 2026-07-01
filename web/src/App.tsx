@@ -9,10 +9,11 @@ import OpsPanel from './components/OpsPanel';
 import AttackerProfilePanel from './components/AttackerProfilePanel';
 import ClusterPanel from './components/ClusterPanel';
 import TrapConfigPanel from './components/TrapConfigPanel';
+import AgentDeployPanel from './components/AgentDeployPanel';
 import StatusBar from './components/StatusBar';
 import './App.css';
 
-type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'traps' | 'ops' | 'profiles';
+type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'traps' | 'ops' | 'profiles';
 
 interface TabDef {
   key: Tab;
@@ -28,6 +29,7 @@ const tabs: TabDef[] = [
   { key: 'countermeasures', label: '反制日志', icon: '' },
   { key: 'assets', label: '资产台账', icon: '' },
   { key: 'cluster', label: '集群管理', icon: '' },
+  { key: 'agent', label: 'Agent部署', icon: '' },
   { key: 'traps', label: '陷阱选配', icon: '' },
   { key: 'ops', label: '运维管理', icon: '' },
   { key: 'profiles', label: '攻击者画像', icon: '' },
@@ -70,6 +72,7 @@ export default function App() {
         {activeTab === 'countermeasures' && <CountermeasurePanel />}
         {activeTab === 'assets' && <AssetLedger />}
         {activeTab === 'cluster' && <ClusterPanel />}
+        {activeTab === 'agent' && <AgentDeployPanel />}
         {activeTab === 'traps' && <TrapConfigPanel />}
         {activeTab === 'ops' && <OpsPanel />}
         {activeTab === 'profiles' && <AttackerProfilePanel />}
