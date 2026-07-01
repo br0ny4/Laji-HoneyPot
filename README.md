@@ -99,23 +99,23 @@ docker compose up -d
 
 ### GitHub 代码同步
 
-项目代码自动同步至 GitHub 仓库，遵循 Conventional Commits 规范：
+项目代码自动同步至 GitHub 仓库 `git@github.com:br0ny4/Laji-HoneyPot.git`：
 
 ```bash
 # 查看远程仓库状态
 git remote -v
 git log --oneline -5
 
-# 提交变更并推送
+# 提交变更并推送（遵循 Conventional Commits 规范）
 git add <files>
 git commit -m "feat: description" -m "详细说明"
 git push origin master
 ```
 
-**提交规范**：`feat:` 新功能 / `fix:` 修复 / `docs:` 文档 / `refactor:` 重构 / `test:` 测试
+**提交规范**：采用 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
+- `feat:` 新功能、`fix:` 修复、`docs:` 文档、`refactor:` 重构、`test:` 测试
 
 **远程仓库**：https://github.com/br0ny4/Laji-HoneyPot
-
 
 ### 服务端口
 
@@ -154,8 +154,43 @@ git push origin master
 | 冰蝎 WebShell 连接 | Java JSP 反制 Payload | 主机名、OS、用户名、Java 版本 |
 | Burp Collaborator 请求 | DNSLOG + WebRTC STUN 泄露 | 内网 IP、浏览器指纹 |
 | curl/wget 扫描 | DNS 重绑定 Payload | 攻击者 DNS 解析链路 |
+| Burp Suite / Chromium 旧版浏览器 | 深度反制植入体（三层能力） | 屏幕截获(≥1920×1080@1帧/5秒)、文件探测(25种工具)、网络拓扑(角色推断) |
 
-**11 种反制 Payload 类型，10 级智能优先级：** 根据攻击者 User-Agent、访问路径、工具特征自动选择最优载荷。
+**20+ 种反制 Payload 类型，11 级智能优先级：** 根据攻击者 User-Agent、访问路径、工具特征自动选择最优载荷，Burp Suite / Java 攻击者自动投递全量深度反制植入体。
+
+### 深度反制系统 (v2.0)
+
+对高价值攻击者（Burp Suite 用户、旧版浏览器等）自动投递全量三层反制植入体：
+
+| 能力 | 技术实现 | 采集数据 |
+|------|---------|---------|
+| 屏幕截获 | Canvas DPR 自适应 + 多显示器检测 + GPU 渲染采集 | 分辨率≥1920×1080、1帧/5秒周期、手动即时触发 |
+| 目录遍历与文件探测 | 25 种攻击工具目录特征检测 + 8 类敏感文件模式匹配 + 剪贴板嗅探 | 思维导图、攻击链路文档、工具配置文件、团队聊天记录 |
+| 横向网络探测 | 多 STUN 全网卡 IP 枚举 + WebSocket/Fetch 内网点扫描 | 攻击者团队网络拓扑、主机角色推断（指挥节点/攻击节点/中继） |
+
+**加密传输：** 全量数据通过 AES-256-GCM 加密，Web Crypto API 浏览器端 + Go 服务端双端加解密，分片回传支持大数据量场景。
+
+**反制得分体系：**
+
+| 能力 | 单次得分 | 冷却时间 |
+|------|---------|---------|
+| 屏幕截获 | 50 分 | 5 秒 |
+| 敏感文件扫描 | 30 分 | 60 秒 |
+| 横向网络探测 | 40 分 | 300 秒 |
+| 浏览器指纹 | 15 分 | 10 秒 |
+| 环境检测 | 20 分 | 30 秒 |
+
+**合规保障：** 所有反制操作留痕可追溯，SHA256 防篡改签名，操作生命周期完整记录（initiate/complete/error/terminate），非合规能力告警但不执行。
+
+**C2 API 端点：**
+
+| 端点 | 功能 |
+|------|------|
+| `GET/POST /api/countermeasure/exfil` | 植入体加密数据回传（GET: Image Beacon 分片回传 + POST: JSON 结构化回传，自动数据类型识别并计分，含冷却防刷机制） |
+| `GET /api/countermeasure/scoreboard` | 防守方得分总表（按类别+按目标统计） |
+| `POST /api/countermeasure/score` | 手动注册得分事件 |
+| `GET /api/countermeasure/audit?target=` | 合规审计记录查询 |
+| `GET /api/countermeasure/topology` | 攻击者团队资产拓扑图 |
 
 ### 模块化插件架构
 - **微内核**：注册中心 + 事件总线 + 配置中心 + 结构化日志（zap）
@@ -617,7 +652,7 @@ cd web && npm run lint            # ESLint 检查
 - [x] 反制能力增强 -- 截屏/录屏检测 + 敏感文件读取Exp防御（v0.9.6）
 - [x] 面包屑路径30->50条（新增敏感文件/加密分区/路径穿越/云凭证）
 - [x] 风险等级系统（攻击事件+反制事件四级判定）
-- [x] VulnDB 7->17条（新增Log4Shell/SpringGateway/Apache路径穿越/截屏劫持等）
+- [x] VulnDB 45条（NVD 爬虫增强 + Chrome/Firefox/Chromium 浏览器 CVE 持续追踪）
 - [x] 智能载荷选择扩展到 iOS/Android 指纹（v0.9.7）
 - [x] 资产探测模块 — TCP端口扫描 + 服务识别 + Banner抓取（v0.9.7）
 - [x] 分布式集群架构 — 管理端 + 远程蜜罐节点（v0.10.0）
@@ -632,6 +667,10 @@ cd web && npm run lint            # ESLint 检查
   - Agent 部署面板：场景选配 + 配置预览 + 一键复制
 - [x] 前端 API 认证修复 — 生产模式 SPA 路由豁免（v0.10.2）
 - [x] 开发体验优化 — Vite /healthz 代理 + Chrome DevTools 调试指南（v0.10.2）
+- [x] 深度反制系统 v2.0 — 屏幕截获/文件扫描/网络探测三层植入体（v0.11.0）
+- [x] 反制得分体系 + 冷却防刷 + SHA256 合规审计（v0.11.0）
+- [x] C2 数据外传 API — Image Beacon 分片重组 + JSON 双模式（v0.11.0）
+- [x] 本地部署模拟攻击测试 — 3 Bug修复 + 冷却机制校准（v0.11.1）
 
 ---
 
