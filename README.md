@@ -205,7 +205,13 @@ api_key: "your-custom-key"
 
 ### 配置方式
 
-编辑 `config.yaml` 中的 `honeypot-engine` 段：
+陷阱选配在" **Agent部署** "面板中完成，选配结果将被写入 Agent 的 `config.yaml`：
+
+- 在管理面板中选择陷阱场景（Web/数据库/主机/基础设施/全量/自定义）
+- 9 服务实时预览网格显示各服务的启用状态
+- 点击"生成 Agent 部署命令"后，`trap_scenario` 将嵌入生成的配置
+
+也可直接编辑 `config.yaml` 中的 `honeypot-engine` 段：
 
 ```yaml
 honeypot-engine:
@@ -232,7 +238,7 @@ curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/traps/config
 
 ## Agent 部署
 
-在 Management Node 平台上一键生成 Agent 配置与部署命令，支持两种部署路径：
+在 Management Node 平台上一键生成 Agent 配置与部署命令，**陷阱场景选配集成在部署流程中**：
 
 ### 部署方式
 
@@ -240,7 +246,7 @@ curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/traps/config
 
 1. 打开管理面板 → "Agent部署" Tab
 2. 填写 / 自动检测管理端地址
-3. 选择陷阱场景（Web/数据库/主机/基础设施）
+3. 选择陷阱场景（Web/数据库/主机/基础设施）— 9 服务网格实时预览
 4. 选择二进制获取方式（Release 预编译 / 源码编译 / 自定义 URL）
 5. 点击"生成 Agent 部署命令"
 6. 在 CLI / 部署脚本 / config.yaml 三 Tab 中复制对应命令
@@ -253,7 +259,7 @@ curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/traps/config
 ```bash
 curl -sSL https://github.com/br0ny4/Laji-HoneyPot/releases/latest/download/honeypot-linux-amd64 \
   -o honeypot && chmod +x honeypot && mkdir -p data && cat > config.yaml <<'HPEOF'
-# --- 自动生成的 Agent 配置（含 manager_addr）---
+# --- 自动生成的 Agent 配置（含 manager_addr 和 trap_scenario）---
 HPEOF
 ./honeypot
 ```
@@ -280,8 +286,7 @@ tail -f data/honeypot.log | grep "registered"
 | 反制日志 | 反制部署记录 + 效果追踪 + 载荷详情 | `/api/countermeasures` |
 | 资产台账 | 攻击者 IP 汇总 + 端口扫描 + 服务清单（风险评级/Banner识别） | `/api/attackers` + `/api/assets/scan` |
 | 集群管理 | 分布式节点监控 + 在线状态 + Agent 部署指引 | `/api/cluster/nodes` |
-| **Agent 部署** | **Management Node 一键生成 Agent 配置与部署命令** | `/api/cluster/agent/generate` |
-| **陷阱选配** | **场景化陷阱模块选配（Web/数据库/主机/基础设施）** | `/api/traps/config` |
+| **Agent 部署** | **一键生成 Agent 配置与部署命令 — 含陷阱场景选配预览** | `/api/cluster/agent/generate` |
 | 运维管理 | 系统状态 + 部署指南 + 性能指标 | `/api/system` + `/api/metrics` |
 | 攻击者画像 | 多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选 | `/api/profiles` + `/api/profiles/stats` |
 
@@ -485,8 +490,7 @@ project-root/
 ├── web/                     # React 前端
 │   ├── src/
 │   │   ├── components/      # UI 组件
-│   │   │   ├── AgentDeployPanel.tsx  # Agent 部署面板
-│   │   │   ├── TrapConfigPanel.tsx   # 陷阱选配面板
+│   │   │   ├── AgentDeployPanel.tsx  # Agent 部署面板（含陷阱选配预览）
 │   │   │   └── ...
 │   │   ├── api.ts           # API 封装
 │   │   ├── App.tsx          # 主路由
