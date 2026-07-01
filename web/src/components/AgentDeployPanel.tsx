@@ -42,6 +42,23 @@ const SOURCE_LABELS: Record<string, string> = {
   url: '自定义下载 URL',
 };
 
+const SERVICE_LABELS: Record<string, string> = {
+  http: 'HTTP', mysql: 'MySQL', redis: 'Redis', ssh: 'SSH',
+  ftp: 'FTP', ldap: 'LDAP', dns: 'DNS', smb: 'SMB', rdp: 'RDP',
+};
+
+const SERVICE_DESC: Record<string, string> = {
+  http: 'Web 蜜罐 — 面包屑引流、浏览器指纹采集、反制载荷注入',
+  mysql: 'MySQL 蜜罐 — 模拟数据库服务、捕获 SQL 注入/暴力破解',
+  redis: 'Redis 蜜罐 — 模拟缓存服务、捕获未授权访问',
+  ssh: 'SSH 蜜罐 — 模拟远程登录服务、捕获暴力破解/密钥窃取',
+  ftp: 'FTP 蜜罐 — 模拟文件传输服务、捕获匿名登录/文件窃取',
+  ldap: 'LDAP 蜜罐 — 模拟目录服务、捕获信息泄露探测',
+  dns: 'DNS 蜜罐 — 模拟域名服务、捕获 DNS 隧道/劫持',
+  smb: 'SMB 蜜罐 — 模拟文件共享服务、捕获横向移动',
+  rdp: 'RDP 蜜罐 — 模拟远程桌面服务、捕获远程登录攻击',
+};
+
 export default function AgentDeployPanel() {
   // 表单状态
   const [managerAddr, setManagerAddr] = useState('10.0.0.1:8443');
@@ -218,6 +235,37 @@ export default function AgentDeployPanel() {
                     {SERVICE_LABELS_MAP[svc] || svc}
                   </label>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* 配置预览 */}
+          {scenarios.length > 0 && (
+            <div className="config-preview">
+              <h4 className="preview-title">
+                配置预览 — {SCENARIO_LABELS[scenario] || scenario}
+                <span className="count-badge">{getPreviewServices().length}/{allServices.length}</span>
+              </h4>
+              <p className="preview-desc">
+                {scenarios.find(s => s.key === scenario)?.description || '自定义选配'}
+              </p>
+              <div className="services-grid">
+                {allServices.map(svc => {
+                  const enabled = getPreviewServices().includes(svc);
+                  return (
+                    <div key={svc} className={`service-card ${enabled ? 'enabled' : 'disabled'}`}>
+                      <div className="service-header">
+                        <span className={`status-dot ${enabled ? 'online' : 'offline'}`} />
+                        <span className="service-name">{SERVICE_LABELS[svc] || svc}</span>
+                      </div>
+                      <p className="service-desc">{SERVICE_DESC[svc] || ''}</p>
+                      <span className="service-state">{enabled ? '已启用' : '未启用'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="preview-note">
+                以上为陷阱部署预览。未启用服务不会监听端口，不产生资源占用。点击"生成 Agent 部署命令"后，选配将被写入 Agent 的 config.yaml。
               </div>
             </div>
           )}
