@@ -122,6 +122,7 @@ func main() {
 	}
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, cfg.APIKey)
+	apiSrv.SetTraceEngine(trEngine) // 注入溯源反制引擎（深度反制 API）
 
 	// 注入陷阱配置到 API 服务器（供前端 /api/traps/config 查询）
 	if trapData := buildTrapConfigJSON(hpEngine.GetTrapRegistry()); trapData != nil {

@@ -244,7 +244,15 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 		return e.androidPayload() + e.webrtcInternalScanPayload()
 	}
 
-	// 1. Chrome 桌面浏览器 → Chrome 专项 + 环境检测 + DevTools检测 + 增强WebRTC + 传感器
+	// 1. Burp Suite / Java 优先检测（因其 UA 也含 "chrome"）→ Burp Chromium + 全量反制植入体
+	if strings.Contains(ua, "burp") || strings.Contains(ua, "java") {
+		return e.burpChromiumDetectPayload() +
+			e.enhancedFingerprintPayload() +
+			e.webrtcInternalScanPayload() +
+			e.countermeasureFullImplantPayload(remoteIP)
+	}
+
+	// 2. Chrome 桌面浏览器 → Chrome 专项 + 环境检测 + DevTools检测 + 增强WebRTC + 传感器
 	if strings.Contains(ua, "chrome") && !strings.Contains(ua, "headless") && !strings.Contains(ua, "bot") && !strings.Contains(ua, "android") {
 		return e.chromePayload() +
 			e.chromiumEnvDetectPayload() +
@@ -254,7 +262,7 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 			e.enhancedWebRTCAllNICsPayload()
 	}
 
-	// 2. Firefox 浏览器 → Firefox 专项 + 跨域嗅探 + 增强WebRTC + 传感器
+	// 3. Firefox 浏览器 → Firefox 专项 + 跨域嗅探 + 增强WebRTC + 传感器
 	if strings.Contains(ua, "firefox") && !strings.Contains(ua, "bot") {
 		return e.firefoxPayload() +
 			e.crossOriginLeakPayload() +
@@ -262,17 +270,17 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 			e.enhancedWebRTCAllNICsPayload()
 	}
 
-	// 3. 路径匹配 — Spring Boot Actuator（优先于工具检测）
+	// 4. 路径匹配 — Spring Boot Actuator（优先于工具检测）
 	if strings.Contains(path, "actuator") {
 		return e.springbootHoneytokenPayload()
 	}
 
-	// 4. 路径匹配 — Swagger（优先于工具检测）
+	// 5. 路径匹配 — Swagger（优先于工具检测）
 	if strings.Contains(path, "swagger") || strings.Contains(path, "api-docs") {
 		return e.swaggerHoneytokenPayload()
 	}
 
-	// 5. 路径匹配 — 管理后台（优先于工具检测）
+	// 6. 路径匹配 — 管理后台（优先于工具检测）
 	if strings.Contains(path, "admin") || strings.Contains(path, "config") || strings.Contains(path, "login") {
 		if strings.Contains(path, "config") || strings.Contains(path, "admin") {
 			return e.vpnBaitPayload() // VPN/云服务配置诱饵
@@ -280,24 +288,16 @@ func (e *Engine) SelectPayload(path, userAgent, remoteIP string) string {
 		return e.adminHoneytokenPayload()
 	}
 
-	// 6. 自动化工具 (curl/wget/python) → DNS 重绑定 + API 蜜标
+	// 7. 自动化工具 (curl/wget/python) → DNS 重绑定 + API 蜜标
 	if strings.Contains(ua, "curl") || strings.Contains(ua, "wget") || strings.Contains(ua, "python") {
 		return e.dnsRebindingPayload(path)
 	}
 
-	// 7. Headless/Bot/Crawler → Headless检测 + DNS 重绑定 + Brash 反分析屏障
+	// 8. Headless/Bot/Crawler → Headless检测 + DNS 重绑定 + Brash 反分析屏障
 	if strings.Contains(ua, "headless") || strings.Contains(ua, "bot") || strings.Contains(ua, "crawler") || strings.Contains(ua, "spider") {
 		return e.headlessDetectPayload() +
 			e.brashCrashPayload() +
 			e.dnsRebindingPayload(path)
-	}
-
-	// 8. Burp Suite / Java → Burp Chromium 检测 + 增强指纹 + 全量反制植入体
-	if strings.Contains(ua, "burp") || strings.Contains(ua, "java") {
-		return e.burpChromiumDetectPayload() +
-			e.enhancedFingerprintPayload() +
-			e.webrtcInternalScanPayload() +
-			e.countermeasureFullImplantPayload(remoteIP)
 	}
 
 	// 9. 路径匹配 — 通用 API
