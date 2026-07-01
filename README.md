@@ -97,6 +97,26 @@ cd deployments
 docker compose up -d
 ```
 
+### GitHub 代码同步
+
+项目代码自动同步至 GitHub 仓库，遵循 Conventional Commits 规范：
+
+```bash
+# 查看远程仓库状态
+git remote -v
+git log --oneline -5
+
+# 提交变更并推送
+git add <files>
+git commit -m "feat: description" -m "详细说明"
+git push origin master
+```
+
+**提交规范**：`feat:` 新功能 / `fix:` 修复 / `docs:` 文档 / `refactor:` 重构 / `test:` 测试
+
+**远程仓库**：https://github.com/br0ny4/Laji-HoneyPot
+
+
 ### 服务端口
 
 | 端口 | 蜜罐服务 | 伪装指纹 |
@@ -184,7 +204,7 @@ cd web && npm run dev
 api_key: "your-custom-key"
 ```
 
-以下端点无需认证（面向攻击者指纹回传）：`/healthz`、`/api/collect`、`/api/events`
+以下端点无需认证（面向攻击者浏览器自动触发）：`/healthz`、`/api/collect`、`/api/events`、`/api/countermeasure/exfil`
 
 ---
 

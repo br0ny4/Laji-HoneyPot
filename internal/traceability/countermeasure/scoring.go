@@ -118,7 +118,9 @@ func (e *ScoringEngine) BatchRegisterScore(targetIP string, opType OpType, count
 func (e *ScoringEngine) isOnCooldown(targetIP string, opType OpType) bool {
 	if ops, ok := e.cooldowns[targetIP]; ok {
 		if last, ok := ops[opType]; ok {
-			return time.Since(last) < time.Duration(CapabilityRegistry[opType].Cooldown)*time.Second
+			// last 是到期时间 (setCooldown 设定为 now + cooldownSec)
+			// 如果当前时间早于到期时间，说明冷却中
+			return time.Now().Before(last)
 		}
 	}
 	return false

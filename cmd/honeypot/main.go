@@ -34,7 +34,7 @@ func main() {
 	logger := log.New(cfg.LogLevel)
 	eventBus := bus.New()
 
-	const version = "0.10.0"
+	const version = "0.11.1"
 	logger.Info("Laji-HoneyPot starting", "version", version)
 
 	st, err := store.New(cfg.DataDir)
