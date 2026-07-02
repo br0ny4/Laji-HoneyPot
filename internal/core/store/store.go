@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Store SQLite 持久化层，存储蜜罐事件、攻击者指纹等核心数据
@@ -57,7 +57,14 @@ func New(dataDir string) (*Store, error) {
 		dbPath = filepath.Join(dataDir, "honeypot.db")
 	}
 
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	var dsn string
+	if dbPath == ":memory:" {
+		dsn = ":memory:"
+	} else {
+		// modernc.org/sqlite 使用 file: URI 传递 pragma
+		dsn = fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dbPath)
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
