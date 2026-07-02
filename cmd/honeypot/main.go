@@ -160,7 +160,10 @@ func main() {
 
 	// 集群 Agent 模式 (role=node): 连接管理端注册
 	if cfg.Cluster.Enabled && cfg.Cluster.Role == "node" {
-		agentTLS := &tls.Config{InsecureSkipVerify: cfg.Cluster.TLSInsecure}
+		agentTLS := &tls.Config{
+			InsecureSkipVerify: cfg.Cluster.TLSInsecure,
+			MinVersion:         tls.VersionTLS13,
+		}
 		clusterAgent := cluster.NewAgent(logger, cluster.AgentConfig{
 			ManagerAddr: cfg.Cluster.ManagerAddr,
 			TLSConfig:   agentTLS,
@@ -230,7 +233,7 @@ func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config,
 		}
 		return &tls.Config{
 			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
+			MinVersion:   tls.VersionTLS13,
 		}, nil
 	}
 
@@ -261,7 +264,7 @@ func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config,
 	}
 	return &tls.Config{
 		Certificates:       []tls.Certificate{tlsCert},
-		MinVersion:         tls.VersionTLS12,
+		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true, // 测试环境不验证客户端证书
 	}, nil
 }

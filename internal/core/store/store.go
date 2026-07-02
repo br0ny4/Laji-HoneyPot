@@ -1307,3 +1307,159 @@ func ttpTacticCN(tactic string) string {
 	}
 	return tactic
 }
+
+// -- 深度反制持久化方法 -----------------------------------------
+
+// ScreenCaptureRecord 截屏记录
+type ScreenCaptureRecord struct {
+	ID         int64  `json:"id"`
+	Timestamp  string `json:"timestamp"`
+	RemoteIP   string `json:"remote_ip"`
+	Resolution string `json:"resolution"`
+	Format     string `json:"format"`
+	DataHash   string `json:"data_hash"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Encrypted  bool   `json:"encrypted"`
+	SessionID  string `json:"session_id"`
+	Thumbnail  string `json:"thumbnail,omitempty"`
+}
+
+// SaveScreenCapture 存储截屏数据
+func (s *Store) SaveScreenCapture(remoteIP, resolution, format, dataHash, sessionID, thumbnail string, sizeBytes int64, encrypted bool) (int64, error) {
+	result, err := s.db.Exec(
+		`INSERT INTO countermeasure_screencaps (remote_ip, resolution, format, data_hash, size_bytes, encrypted, session_id, thumbnail)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		remoteIP, resolution, format, dataHash, sizeBytes, boolToInt(encrypted), sessionID, thumbnail,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("save screencap: %w", err)
+	}
+	return result.LastInsertId()
+}
+
+// ListScreenCaptures 分页查询截屏记录
+func (s *Store) ListScreenCaptures(remoteIP string, limit, offset int) ([]ScreenCaptureRecord, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	where := ""
+	args := []interface{}{}
+	if remoteIP != "" {
+		where = " WHERE remote_ip = ?"
+		args = append(args, remoteIP)
+	}
+	var total int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM countermeasure_screencaps"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	rows, err := s.db.Query(
+		"SELECT id, timestamp, remote_ip, resolution, format, data_hash, size_bytes, encrypted, session_id, thumbnail FROM countermeasure_screencaps"+where+" ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+		args...,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var records []ScreenCaptureRecord
+	for rows.Next() {
+		var r ScreenCaptureRecord
+		var enc int
+		if err := rows.Scan(&r.ID, &r.Timestamp, &r.RemoteIP, &r.Resolution, &r.Format, &r.DataHash, &r.SizeBytes, &enc, &r.SessionID, &r.Thumbnail); err != nil {
+			continue
+		}
+		r.Encrypted = enc == 1
+		records = append(records, r)
+	}
+	return records, total, rows.Err()
+}
+
+// GetScreenCapture 获取单条截屏
+func (s *Store) GetScreenCapture(id int64) (*ScreenCaptureRecord, error) {
+	var r ScreenCaptureRecord
+	var enc int
+	err := s.db.QueryRow(
+		"SELECT id, timestamp, remote_ip, resolution, format, data_hash, size_bytes, encrypted, session_id, thumbnail FROM countermeasure_screencaps WHERE id = ?",
+		id,
+	).Scan(&r.ID, &r.Timestamp, &r.RemoteIP, &r.Resolution, &r.Format, &r.DataHash, &r.SizeBytes, &enc, &r.SessionID, &r.Thumbnail)
+	if err != nil {
+		return nil, err
+	}
+	r.Encrypted = enc == 1
+	return &r, nil
+}
+
+// FileScanRecord 文件扫描记录
+type FileScanRecord struct {
+	ID             int64  `json:"id"`
+	Timestamp      string `json:"timestamp"`
+	RemoteIP       string `json:"remote_ip"`
+	FilePath       string `json:"file_path"`
+	FileName       string `json:"file_name"`
+	FileSize       int64  `json:"file_size"`
+	Category       string `json:"category"`
+	Sensitive      bool   `json:"sensitive"`
+	ContentPreview string `json:"content_preview,omitempty"`
+}
+
+// SaveFileScan 存储文件扫描结果
+func (s *Store) SaveFileScan(remoteIP, filePath, fileName, category, contentPreview string, fileSize int64, sensitive bool) (int64, error) {
+	result, err := s.db.Exec(
+		`INSERT INTO countermeasure_filescans (remote_ip, file_path, file_name, file_size, category, sensitive, content_preview)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		remoteIP, filePath, fileName, fileSize, category, boolToInt(sensitive), contentPreview,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("save filescan: %w", err)
+	}
+	return result.LastInsertId()
+}
+
+// ListFileScans 分页查询文件扫描
+func (s *Store) ListFileScans(remoteIP, category string, limit, offset int) ([]FileScanRecord, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	where := " WHERE 1=1"
+	args := []interface{}{}
+	if remoteIP != "" {
+		where += " AND remote_ip = ?"
+		args = append(args, remoteIP)
+	}
+	if category != "" {
+		where += " AND category = ?"
+		args = append(args, category)
+	}
+	var total int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM countermeasure_filescans"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	rows, err := s.db.Query(
+		"SELECT id, timestamp, remote_ip, file_path, file_name, file_size, category, sensitive, content_preview FROM countermeasure_filescans"+where+" ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+		args...,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var records []FileScanRecord
+	for rows.Next() {
+		var r FileScanRecord
+		var sens int
+		if err := rows.Scan(&r.ID, &r.Timestamp, &r.RemoteIP, &r.FilePath, &r.FileName, &r.FileSize, &r.Category, &sens, &r.ContentPreview); err != nil {
+			continue
+		}
+		r.Sensitive = sens == 1
+		records = append(records, r)
+	}
+	return records, total, rows.Err()
+}
+
+// boolToInt 布尔转整数
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

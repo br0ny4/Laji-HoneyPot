@@ -192,6 +192,34 @@ git push origin master
 | `GET /api/countermeasure/audit?target=` | 合规审计记录查询 |
 | `GET /api/countermeasure/topology` | 攻击者团队资产拓扑图 |
 
+**管理端全链路 API（v0.12.0）：**
+
+| 端点 | 功能 |
+|------|------|
+| **截屏链路** | |
+| `GET /api/countermeasure/screencaps?ip=&limit=&offset=` | 截屏记录分页列表（含缩略图 base64） |
+| `GET /api/countermeasure/screencaps/{id}` | 截屏详情（分辨率/格式/哈希/大小） |
+| `GET /api/countermeasure/screencaps/{id}/download` | 截屏缩略图下载 |
+| `GET /api/countermeasure/filescans?ip=&category=&limit=&offset=` | 文件扫描记录分页列表 |
+| **远程权限接管** | |
+| `WS /api/countermeasure/shell?target={ip}` | 远程 Shell WebSocket 交互（命令实时回显、30s超时、5min空闲回收） |
+| `POST /api/countermeasure/transfer/upload` | 分块文件上传（X-Offset/X-Total-Size 断点续传） |
+| `GET /api/countermeasure/transfer/download?target=&path=` | 文件下载（支持 Range 断点续传） |
+| `GET /api/countermeasure/transfer/status?id=` | 传输状态查询 |
+| `POST /api/countermeasure/transfer/pause` | 暂停传输 |
+| `GET /api/countermeasure/transfer/list?target=` | 传输记录列表 |
+| `GET /api/countermeasure/processes?target=&filter=` | 进程列表（ps/tasklist 跨平台） |
+| `POST /api/countermeasure/processes/start` | 启动进程（nohup 后台启动） |
+| `POST /api/countermeasure/processes/stop` | 停止进程（kill/taskkill） |
+| `POST /api/countermeasure/processes/delete` | 删除进程二进制文件 |
+| `WS /api/countermeasure/desktop?target=&quality=&fps=` | 桌面远控 Viewer WebSocket（帧流推送） |
+| `WS /api/countermeasure/desktop/agent?target=` | 桌面远控 Agent WebSocket（帧源接入） |
+| **安全合规** | |
+| `POST /api/mfa/challenge` | MFA 二次认证挑战码（TOTP RFC 6238） |
+| `POST /api/mfa/verify` | 验证 MFA 码并签发 5 分钟操作令牌 |
+| `GET /api/audit/chain?limit=` | 不可篡改审计链列表（SHA256 链式哈希） |
+| `GET /api/audit/chain/verify` | 审计链完整性独立校验 |
+
 ### 模块化插件架构
 - **微内核**：注册中心 + 事件总线 + 配置中心 + 结构化日志（zap）
 - **插件化**：蜜罐引擎 / 溯源引擎 / 运维引擎，独立启停
