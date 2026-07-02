@@ -24,6 +24,7 @@ type ClusterConfig struct {
 	CertFile    string `yaml:"cert_file"`    // TLS 证书路径
 	KeyFile     string `yaml:"key_file"`     // TLS 私钥路径
 	CAFile      string `yaml:"ca_file"`      // CA 证书路径
+	TLSInsecure bool   `yaml:"tls_insecure"` // 跳过 TLS 验证（测试环境）
 }
 
 // Config 顶层配置结构

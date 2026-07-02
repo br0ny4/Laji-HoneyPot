@@ -158,6 +158,29 @@ func main() {
 		}
 	}
 
+	// 集群 Agent 模式 (role=node): 连接管理端注册
+	if cfg.Cluster.Enabled && cfg.Cluster.Role == "node" {
+		agentTLS := &tls.Config{InsecureSkipVerify: cfg.Cluster.TLSInsecure}
+		clusterAgent := cluster.NewAgent(logger, cluster.AgentConfig{
+			ManagerAddr: cfg.Cluster.ManagerAddr,
+			TLSConfig:   agentTLS,
+			Services: []string{
+				"http", "mysql", "redis", "ssh", "ftp", "ldap", "dns", "smb", "rdp",
+			},
+		})
+		go func() {
+			for {
+				if err := clusterAgent.Connect(); err != nil {
+					logger.Errorw("cluster agent connect failed", "error", err)
+					time.Sleep(10 * time.Second)
+					continue
+				}
+				break
+			}
+		}()
+		logger.Infow("cluster agent connecting", "manager", cfg.Cluster.ManagerAddr)
+	}
+
 	// 前端 SPA 静态文件服务（从 web/dist/ 或 web/ 目录加载）
 	if fh := getFrontendFS("."); fh != nil {
 		apiSrv.SetFrontendHandler(http.FileServer(fh))
