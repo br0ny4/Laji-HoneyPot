@@ -14,6 +14,7 @@ import (
 
 	"github.com/Laji-HoneyPot/honeypot/internal/asset"
 	"github.com/Laji-HoneyPot/honeypot/internal/cluster"
+	"github.com/Laji-HoneyPot/honeypot/internal/core"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
@@ -335,7 +336,7 @@ func (s *Server) handleFingerprints(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.store.GetDetailedStats()
 	info := map[string]interface{}{
-		"version":    "0.10.0",
+		"version":    core.Version,
 		"go_version": "go1.22+",
 		"database":   "SQLite (WAL模式)",
 		"services":   "HTTP/MySQL/Redis/SSH/FTP/LDAP/DNS/SMB/RDP",
@@ -411,7 +412,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "0.10.0"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": core.Version})
 }
 
 func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {

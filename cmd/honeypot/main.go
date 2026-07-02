@@ -2,8 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +20,7 @@ import (
 
 	"github.com/Laji-HoneyPot/honeypot/internal/alerter"
 	"github.com/Laji-HoneyPot/honeypot/internal/cluster"
+	"github.com/Laji-HoneyPot/honeypot/internal/core"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/api"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
@@ -34,7 +43,7 @@ func main() {
 	logger := log.New(cfg.LogLevel)
 	eventBus := bus.New()
 
-	const version = "0.11.1"
+	const version = core.Version
 	logger.Info("Laji-HoneyPot starting", "version", version)
 
 	st, err := store.New(cfg.DataDir)
@@ -135,12 +144,17 @@ func main() {
 	apiSrv.SetClusterGenerator(clusterGen) // Generator 始终可用（前端需 manager mode 才可部署）
 
 	if cfg.Cluster.Enabled && cfg.Cluster.Role == "manager" {
-		clusterMgr = cluster.NewManager(logger, nil) // TLS 配置后续从 cert 文件加载
-		if err := clusterMgr.Listen(cfg.Cluster.ListenAddr); err != nil {
-			logger.Errorw("cluster manager listen failed", "error", err)
+		tlsCfg, tlsErr := buildClusterTLS(cfg.Cluster, logger)
+		if tlsErr != nil {
+			logger.Errorw("cluster TLS config failed", "error", tlsErr)
 		} else {
-			apiSrv.SetClusterManager(clusterMgr)
-			logger.Infow("cluster manager started", "listen", cfg.Cluster.ListenAddr)
+			clusterMgr = cluster.NewManager(logger, tlsCfg)
+			if err := clusterMgr.Listen(cfg.Cluster.ListenAddr); err != nil {
+				logger.Errorw("cluster manager listen failed", "error", err)
+			} else {
+				apiSrv.SetClusterManager(clusterMgr)
+				logger.Infow("cluster manager started", "listen", cfg.Cluster.ListenAddr)
+			}
 		}
 	}
 
@@ -183,7 +197,51 @@ func main() {
 	logger.Info("Laji-HoneyPot stopped")
 }
 
-// buildTrapConfigJSON 构建陷阱配置 JSON（供 API 端点和前端渲染）
+// buildClusterTLS 构建集群 TLS 配置
+// 优先使用配置文件中的证书路径；若未配置则自动生成自签名证书（仅适用于测试环境）
+func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config, error) {
+	if cfg.CertFile != "" && cfg.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load cert: %w", err)
+		}
+		return &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}, nil
+	}
+
+	// 自动生成自签名证书（仅测试用）
+	logger.Warn("cluster: generating self-signed TLS cert (TEST ONLY — use real certs in production)")
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "honeypot-cluster"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return nil, fmt.Errorf("create cert: %w", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("parse cert: %w", err)
+	}
+	return &tls.Config{
+		Certificates:       []tls.Certificate{tlsCert},
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // 测试环境不验证客户端证书
+	}, nil
+}
 func buildTrapConfigJSON(reg *traps.Registry) []byte {
 	if reg == nil {
 		return nil

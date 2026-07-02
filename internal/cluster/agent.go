@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/core"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
@@ -19,20 +20,20 @@ import (
 //   - 转发本地事件到管理端
 //   - 断线重连
 type Agent struct {
-	logger    *log.Logger
+	logger      *log.Logger
 	managerAddr string
-	tlsCfg    *tls.Config
-	nodeInfo  NodeInfo
+	tlsCfg      *tls.Config
+	nodeInfo    NodeInfo
 
-	conn     net.Conn
-	fr       *framer
+	conn net.Conn
+	fr   *framer
 
 	// 事件缓冲队列：本地事件 → 批量转发到管理端
 	eventBuf []ClusterEvent
 	bufMu    sync.Mutex
 
-	hbSec      int          // 心跳间隔 (秒)
-	stopCh     chan struct{}
+	hbSec       int // 心跳间隔 (秒)
+	stopCh      chan struct{}
 	reconnectCh chan struct{}
 
 	mu     sync.Mutex
@@ -62,7 +63,7 @@ func NewAgent(logger *log.Logger, cfg AgentConfig) *Agent {
 		nodeInfo: NodeInfo{
 			NodeID:    nodeID,
 			Hostname:  hostnameOr("unknown"),
-			Version:   "0.10.0",
+			Version:   core.Version,
 			Services:  cfg.Services,
 			OS:        runtime.GOOS,
 			Arch:      runtime.GOARCH,

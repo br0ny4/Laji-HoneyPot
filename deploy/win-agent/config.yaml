@@ -1,0 +1,39 @@
+# Laji-HoneyPot Agent Configuration
+# 管理端: 10.111.31.103 (macOS M1)
+# Agent 节点: 10.111.29.4 (Windows 11)
+
+log_level: info
+api_addr: "0.0.0.0:8080"
+data_dir: "./data"
+api_key: "hp-agent-2024"
+
+plugins:
+  honeypot-engine:
+    enabled: true
+    trap_scenario: "full"
+    http_port: 8081
+    mysql_port: 3306
+    redis_port: 6379
+    ssh_port: 2222
+    ftp_port: 2121
+    ldap_port: 3890
+    dns_port: 5354
+    smb_port: 4450
+    rdp_port: 33890
+  traceability-engine:
+    enabled: true
+    update_interval: "24h"
+  ops-engine:
+    enabled: true
+
+# 集群模式 — Agent 节点
+cluster:
+  enabled: true
+  role: "node"
+  manager_addr: "10.111.31.103:8443"
+  tls_insecure: true
+  cert_file: ""
+  key_file: ""
+  ca_file: ""
+
+alerts: []

@@ -2,4 +2,4 @@
 package core
 
 // Version 当前 Laji-HoneyPot 版本号
-const Version = "0.10.0"
+const Version = "0.11.1"
