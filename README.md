@@ -754,6 +754,9 @@ cd web && npm run lint            # ESLint 检查
   <a href="https://github.com/laohuan12138" title="laohuan12138 — 贡献者">
     <img src="https://github.com/laohuan12138.png" width="64" height="64" style="border-radius:50%;margin:4px" alt="laohuan12138" />
   </a>
+  <a href="https://github.com/Destinyice" title="Destinyice — 贡献者">
+    <img src="https://github.com/Destinyice.png" width="64" height="64" style="border-radius:50%;margin:4px" alt="Destinyice" />
+  </a>
 </p>
 
 <p align="center">

@@ -1,60 +1,93 @@
-# ==========================================
-# Laji-HoneyPot Agent PowerShell Deploy Script
-# Manager: 10.111.31.103:8443 (macOS)
-# Agent:   10.111.29.4 (Windows 11)
-# Usage:   右键 -> "使用 PowerShell 运行"
-#          or: powershell -ExecutionPolicy Bypass -File deploy.ps1
-# ==========================================
+<#
+.SYNOPSIS
+    Laji-HoneyPot Windows Agent v0.12.0 部署脚本
+.DESCRIPTION
+    在 Windows 11 (10.111.29.4) 上部署 Agent 蜜罐节点
+    自动配置防火墙规则，连接 macOS Manager
+.NOTES
+    必须以管理员身份运行 PowerShell
+    需要 honeypot-agent.exe 在同一目录
+#>
 
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Laji-HoneyPot Agent"
 
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  Laji-HoneyPot Agent Deployment" -ForegroundColor White
-Write-Host "  Manager: 10.111.31.103:8443" -ForegroundColor Gray
-Write-Host "  Agent:   10.111.29.4" -ForegroundColor Gray
-Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host "  Laji-HoneyPot Agent v0.12.0" -ForegroundColor Cyan
+Write-Host "  Manager: $(Get-Content config.yaml | Select-String 'manager_addr')" -ForegroundColor Green
+Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Check config.yaml
-if (-not (Test-Path "config.yaml")) {
-    Write-Host "[ERROR] config.yaml not found! Place it alongside honeypot-agent.exe" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
+# ---- 检测管理员权限 ----
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+if (-not $isAdmin) {
+    Write-Host "[WARN] 未以管理员运行，防火墙规则配置将跳过" -ForegroundColor Yellow
+    Write-Host "       右键 PowerShell → 以管理员身份运行 以获取完整功能" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+# ---- 查找可执行文件 ----
+$exe = $null
+$possibleExes = @("honeypot-agent.exe", "honeypot.exe")
+foreach ($name in $possibleExes) {
+    if (Test-Path $name) {
+        $exe = $name
+        break
+    }
+}
+
+if (-not $exe) {
+    Write-Host "[ERROR] 未找到 honeypot-agent.exe 或 honeypot.exe!" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "请将编译好的 Windows Agent 二进制文件放置到当前目录:"
+    Write-Host "  1. 在 macOS 上交叉编译: GOOS=windows GOARCH=amd64 go build -o honeypot-agent.exe ./cmd/honeypot/"
+    Write-Host "  2. 将 honeypot-agent.exe 复制到本目录"
+    Write-Host "  3. 重新运行本脚本"
+    Write-Host ""
+    pause
     exit 1
 }
-Write-Host "[OK] config.yaml ready" -ForegroundColor Green
 
-# 2. Check binary
-if (-not (Test-Path "honeypot-agent.exe")) {
-    Write-Host "[ERROR] honeypot-agent.exe not found!" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+Write-Host "[OK] 找到: $exe" -ForegroundColor Green
+
+# ---- 配置 Windows 防火墙 ----
+if ($isAdmin) {
+    Write-Host "[INFO] 配置 Windows 防火墙入站规则..." -ForegroundColor Cyan
+    $ports = @(
+        @{Port=80; Name="Honeypot_HTTP"},
+        @{Port=3306; Name="Honeypot_MySQL"},
+        @{Port=6379; Name="Honeypot_Redis"},
+        @{Port=2222; Name="Honeypot_SSH"},
+        @{Port=2121; Name="Honeypot_FTP"},
+        @{Port=3890; Name="Honeypot_LDAP"},
+        @{Port=4450; Name="Honeypot_SMB"},
+        @{Port=33890; Name="Honeypot_RDP"}
+    )
+    foreach ($rule in $ports) {
+        try {
+            New-NetFirewallRule -DisplayName $rule.Name `
+                -Direction Inbound `
+                -LocalPort $rule.Port `
+                -Protocol TCP `
+                -Action Allow `
+                -ErrorAction SilentlyContinue | Out-Null
+            Write-Host "  [OK] $($rule.Name) :$($rule.Port)/TCP" -ForegroundColor Green
+        } catch {
+            Write-Host "  [SKIP] $($rule.Name) 已存在或配置失败" -ForegroundColor Yellow
+        }
+    }
 }
-Write-Host "[OK] honeypot-agent.exe ready" -ForegroundColor Green
 
-# 3. Create data directory
+# ---- 创建数据目录 ----
 if (-not (Test-Path "data")) {
-    New-Item -ItemType Directory -Path "data" | Out-Null
+    New-Item -ItemType Directory -Path "data" -Force | Out-Null
+    Write-Host "[OK] 数据目录: data/" -ForegroundColor Green
 }
-Write-Host "[OK] data directory ready" -ForegroundColor Green
 
-# 4. Create logs directory
-if (-not (Test-Path "logs")) {
-    New-Item -ItemType Directory -Path "logs" | Out-Null
-}
-Write-Host "[OK] logs directory ready" -ForegroundColor Green
-
+# ---- 启动 Agent ----
 Write-Host ""
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  Starting Agent..." -ForegroundColor Yellow
-Write-Host "  Manager API:  http://10.111.31.103:8080" -ForegroundColor Gray
-Write-Host "  Cluster TLS:  10.111.31.103:8443" -ForegroundColor Gray
-Write-Host "  Trap HTTP:    http://10.111.29.4:8081" -ForegroundColor Gray
-Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "[INFO] 正在启动 Laji-HoneyPot Agent..." -ForegroundColor Green
+Write-Host "==============================" -ForegroundColor Cyan
 Write-Host ""
 
-# 5. Start Agent
-& .\honeypot-agent.exe
-
-Write-Host "Agent exited." -ForegroundColor Yellow
-Read-Host "Press Enter to exit"
+& ".\$exe"

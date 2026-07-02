@@ -1,6 +1,6 @@
 # Laji-HoneyPot Agent Configuration
-# 管理端: 10.111.31.103 (macOS M1)
-# Agent 节点: 10.111.29.4 (Windows 11)
+# Manager: 请填写 macOS 本机局域网 IP (ifconfig en0 | grep inet)
+# Agent: 10.111.29.4 (Windows 11)
 
 log_level: info
 api_addr: "0.0.0.0:8080"
@@ -10,8 +10,9 @@ api_key: "hp-agent-2024"
 plugins:
   honeypot-engine:
     enabled: true
+    # Agent 节点建议用 full 场景全量部署蜜罐
     trap_scenario: "full"
-    http_port: 8081
+    http_port: 80
     mysql_port: 3306
     redis_port: 6379
     ssh_port: 2222
@@ -30,6 +31,10 @@ plugins:
 cluster:
   enabled: true
   role: "node"
+  # ============================================================
+  # 重要: 请将下面 IP 改为 macOS M1 本机的局域网 IP
+  # 获取方法: 在 macOS 终端运行 → ipconfig getifaddr en0
+  # ============================================================
   manager_addr: "10.111.31.103:8443"
   tls_insecure: true
   cert_file: ""
