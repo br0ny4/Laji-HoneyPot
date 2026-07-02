@@ -224,6 +224,19 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_cm_score_ip ON countermeasure_scores(target_ip);
 	CREATE INDEX IF NOT EXISTS idx_cm_score_cat ON countermeasure_scores(category);
+
+	-- 认证 — 用户表
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE NOT NULL,
+		password_hash TEXT NOT NULL,
+		role TEXT DEFAULT 'admin',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_login DATETIME,
+		login_attempts INTEGER DEFAULT 0,
+		locked_until DATETIME
+	);
+	CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 	`
 	_, err := s.db.Exec(ddl)
 	if err != nil {
@@ -1462,4 +1475,83 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ============================================================
+// 用户管理 (JWT 认证体系)
+// ============================================================
+
+// User 用户模型
+type User struct {
+	ID           int64  `json:"id"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"-"`
+	Role         string `json:"role"`
+	CreatedAt    string `json:"created_at"`
+	LastLogin    string `json:"last_login,omitempty"`
+}
+
+// CreateUser 创建用户
+func (s *Store) CreateUser(username, passwordHash, role string) error {
+	_, err := s.db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+		username, passwordHash, role)
+	return err
+}
+
+// UserExists 检查用户是否存在
+func (s *Store) UserExists(username string) (bool, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", username).Scan(&count)
+	return count > 0, err
+}
+
+// GetUser 根据用户名获取用户
+func (s *Store) GetUser(username string) (*User, error) {
+	var u User
+	var lastLogin sql.NullString
+	err := s.db.QueryRow(
+		"SELECT id, username, password_hash, role, created_at, last_login FROM users WHERE username = ?",
+		username,
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &lastLogin)
+	if err != nil {
+		return nil, err
+	}
+	if lastLogin.Valid {
+		u.LastLogin = lastLogin.String
+	}
+	return &u, nil
+}
+
+// UpdateLastLogin 更新最后登录时间
+func (s *Store) UpdateLastLogin(userID int64) error {
+	_, err := s.db.Exec("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", userID)
+	return err
+}
+
+// UpdatePassword 更新密码哈希
+func (s *Store) UpdatePassword(username, passwordHash string) error {
+	_, err := s.db.Exec("UPDATE users SET password_hash = ? WHERE username = ?", passwordHash, username)
+	return err
+}
+
+// ListUsers 列出所有用户
+func (s *Store) ListUsers() ([]User, error) {
+	rows, err := s.db.Query("SELECT id, username, role, created_at, last_login FROM users ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var u User
+		var lastLogin sql.NullString
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &lastLogin); err != nil {
+			continue
+		}
+		if lastLogin.Valid {
+			u.LastLogin = lastLogin.String
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
 }

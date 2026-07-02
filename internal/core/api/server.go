@@ -37,19 +37,19 @@ type Server struct {
 	desktopHub      *DesktopHub  // 桌面远控会话管理
 	mfaProvider     *MFAProvider // MFA 多因子认证
 	auditChain      *AuditChain  // 不可篡改审计链
+	authManager     *AuthManager // JWT 认证管理器
 	profileEngine   *profile.Engine
 	clusterMgr      *cluster.Manager     // 集群管理端 (可选)
 	clusterGen      *cluster.Generator   // Agent 生成引擎 (可选)
 	trapConfigData  []byte               // 陷阱配置 JSON 缓存（启动时写入，只读）
 	traceEngine     *traceability.Engine // 溯源反制引擎（深度反制API）
 	mux             *http.ServeMux
-	apiKey          string // 管理后台认证密钥，空则不启用
-	startTime       time.Time
 	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
+	startTime       time.Time
 }
 
 // NewServer 创建 API 服务器
-func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, apiKey string) *Server {
+func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, authMgr *AuthManager) *Server {
 	s := &Server{
 		logger:        logger,
 		store:         st,
@@ -61,9 +61,9 @@ func NewServer(logger *log.Logger, st *store.Store, vdb *vulndb.DB, hub *WSHub, 
 		desktopHub:    NewDesktopHub(logger),
 		mfaProvider:   NewMFAProvider(),
 		auditChain:    NewAuditChain(),
+		authManager:   authMgr,
 		profileEngine: profile.NewEngine(),
 		mux:           http.NewServeMux(),
-		apiKey:        apiKey,
 		startTime:     time.Now(),
 	}
 	s.registerRoutes()
@@ -133,6 +133,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
 	// 健康检查
 	s.mux.HandleFunc("/healthz", s.handleHealth)
+
+	// 认证 — JWT 登录/刷新/登出
+	s.mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		s.authManager.HandleLogin(s.logger, w, r)
+	})
+	s.mux.HandleFunc("/api/auth/refresh", s.authManager.HandleRefresh)
+	s.mux.HandleFunc("/api/auth/logout", s.authManager.HandleLogout)
+	s.mux.HandleFunc("/api/auth/changepassword", s.authManager.HandleChangepassword)
 	// 实时推送(SSE)
 	s.mux.HandleFunc("/api/events", s.wsHub.ServeWS)
 	// 浏览器指纹采集
@@ -198,9 +206,9 @@ func (s *Server) registerRoutes() {
 }
 
 // Handler 返回带安全中间件链的 http.Handler
-// 链式顺序: 请求日志 → CORS白名单 → API Key认证 → 速率限制
+// 链式顺序: 请求日志 → CORS白名单 → JWT认证 → 速率限制
 func (s *Server) Handler() http.Handler {
-	return requestLogMiddleware(s.logger, corsMiddleware(s.apiKeyMiddleware(rateLimitMiddleware(s.mux))))
+	return requestLogMiddleware(s.logger, corsMiddleware(s.authManager.JWTAuthMiddleware(rateLimitMiddleware(s.mux))))
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -221,8 +229,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 			}
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
-		w.Header().Set("Access-Control-Expose-Headers", "X-API-Key")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-MFA-Token, X-MFA-Code")
+		w.Header().Set("Access-Control-Expose-Headers", "Authorization, X-MFA-Token")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -230,65 +238,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// apiKeyMiddleware API Key 认证中间件
-// 仅当配置了 api_key 时才启用。以下端点豁免认证：
-//   - /healthz         （健康检查，无需认证）
-//   - /api/collect     （浏览器指纹采集，由攻击者浏览器触发，不可拦截）
-//   - /api/events      （SSE 实时推送，前端 EventSource 不支持自定义 Header）
-//   - 非 /api/ 路径    （前端 SPA 静态资源，浏览器初始加载无法携带 X-API-Key）
-func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 未配置 API Key → 跳过认证
-		if s.apiKey == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		path := r.URL.Path
-
-		// 豁免端点：健康检查、指纹采集、SSE 推送、反制数据外传
-		// /api/countermeasure/exfil 由攻击者浏览器中的植入体JS触发，不可拦截
-		if path == "/healthz" || strings.HasPrefix(path, "/api/collect") || path == "/api/events" || path == "/api/countermeasure/exfil" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// 豁免前端静态资源：非 /api/ 路径由 SPA handler 处理，浏览器初始加载无法携带 X-API-Key
-		if !strings.HasPrefix(path, "/api/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// 校验 X-API-Key 请求头
-		key := r.Header.Get("X-API-Key")
-		// 也支持 ?api_key=xxx 查询参数（SSE 场景下前端无法设置 Header）
-		if key == "" {
-			key = r.URL.Query().Get("api_key")
-		}
-		if key != s.apiKey {
-			s.logger.Warnw("api auth failed",
-				"remote", r.RemoteAddr,
-				"path", path,
-				"provided_key", maskKey(key),
-			)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprint(w, `{"error":"unauthorized","message":"valid X-API-Key required"}`)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// maskKey 脱敏显示 Key（仅用于日志）
-func maskKey(key string) string {
-	if len(key) <= 4 {
-		return "***"
-	}
-	return key[:4] + strings.Repeat("*", len(key)-4)
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

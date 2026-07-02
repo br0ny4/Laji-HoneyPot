@@ -130,7 +130,15 @@ func main() {
 		logger.Infow("alerter initialized", "channels", len(alertChannels))
 	}
 
-	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, cfg.APIKey)
+	// JWT 认证管理器（默认密码 admin/admin123，生产环境请务必修改）
+	authCfg := api.DefaultJWTConfig()
+	authMgr := api.NewAuthManager(authCfg, st)
+	if err := authMgr.EnsureDefaultAdmin(); err != nil {
+		logger.Fatalw("ensure default admin failed", "error", err)
+	}
+	logger.Infow("auth manager initialized", "default_user", "admin")
+
+	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, authMgr)
 	apiSrv.SetTraceEngine(trEngine) // 注入溯源反制引擎（深度反制 API）
 
 	// 注入陷阱配置到 API 服务器（供前端 /api/traps/config 查询）

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import DashboardPanel from './components/DashboardPanel';
 import TopologyGraph from './components/TopologyGraph';
 import AttackPanel from './components/AttackPanel';
@@ -10,6 +10,8 @@ import AttackerProfilePanel from './components/AttackerProfilePanel';
 import ClusterPanel from './components/ClusterPanel';
 import AgentDeployPanel from './components/AgentDeployPanel';
 import StatusBar from './components/StatusBar';
+import LoginPage from './components/LoginPage';
+import { isLoggedIn, logout } from './api';
 import './App.css';
 
 type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles';
@@ -35,17 +37,43 @@ const tabs: TabDef[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [authenticated, setAuthenticated] = useState(isLoggedIn());
+
+  // 定期检查令牌状态
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAuthenticated(isLoggedIn());
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleLoginSuccess = () => {
+    setAuthenticated(true);
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setAuthenticated(false);
+    setActiveTab('dashboard');
+  };
+
+  if (!authenticated) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="app">
       <header className="app-header">
         <div className="header-left">
           <h1 className="app-title">Laji-HoneyPot</h1>
-          <span className="app-version">v0.10.0</span>
+          <span className="app-version">v0.12.0</span>
         </div>
         <div className="header-right">
           <span className="status-indicator status-online" />
           <span className="status-text">运行中</span>
+          <button className="btn-logout" onClick={handleLogout} title="退出登录">
+            退出
+          </button>
         </div>
       </header>
 
