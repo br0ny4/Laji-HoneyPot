@@ -95,6 +95,17 @@ info "=== MFA ==="
 CHALLENGE=$(curl -s -X POST "$MGR/api/mfa/challenge" -H "$AUTH" -H "Content-Type: application/json" -d '{"user":"admin"}' | python3 -c "import sys,json; print(json.load(sys.stdin).get('challenge',''))" 2>/dev/null)
 [ -n "$CHALLENGE" ] && ok "MFA Challenge: $CHALLENGE" || bad "MFA"
 
+# 10. Agent 部署包端点
+echo ""
+info "=== Agent 部署包 (v0.17.1) ==="
+LINUX_PKG=$(curl -s -o /dev/null -w "%{http_code}" "$MGR/api/cluster/agent/package?os=linux" 2>/dev/null)
+WIN_PKG=$(curl -s -o /dev/null -w "%{http_code}" "$MGR/api/cluster/agent/package?os=windows" 2>/dev/null)
+if [ "$LINUX_PKG" = "200" ] && [ "$WIN_PKG" = "200" ]; then
+    ok "Agent 部署包端点 (linux HTTP $LINUX_PKG, windows HTTP $WIN_PKG)"
+else
+    bad "Agent 部署包端点 (linux=$LINUX_PKG, windows=$WIN_PKG)"
+fi
+
 echo ""
 echo "=========================================="
 echo "  快速验证完成"

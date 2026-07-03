@@ -149,9 +149,25 @@ export default function ClusterPanel() {
       )}
 
       {/* 部署指引 */}
-      {data?.cluster_enabled && (
+      {(data?.cluster_enabled || true) && (
         <div style={{ margin: '16px', padding: '16px', background: '#1a2332', borderRadius: 8, border: '1px solid #2d3a4f' }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: 14, color: '#c8d6e5' }}>部署远程节点</h3>
+          <h3 style={{ margin: '0 0 12px 0', fontSize: 14, color: '#c8d6e5' }}>部署远程节点 (v0.17.1 双模式)</h3>
+          
+          <div style={{ marginBottom: 12 }}>
+            <span style={{ color: '#f0c040', fontWeight: 600, fontSize: 13 }}>方式1: 一键拉取 (推荐) </span>
+            <span style={{ color: '#8899aa', fontSize: 12 }}>— 切换到 </span>
+            <span style={{ color: '#7ec8a0', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}
+                  onClick={() => { const tabs = document.querySelectorAll('.tab-label'); tabs.forEach(t => { if (t.textContent?.includes('Agent')) (t as HTMLElement).click(); }) }}>
+              Agent部署
+            </span>
+            <span style={{ color: '#8899aa', fontSize: 12 }}> 页面，选择一键拉取模式获取命令</span>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <span style={{ color: '#f0c040', fontWeight: 600, fontSize: 13 }}>方式2: 手动部署 </span>
+            <span style={{ color: '#8899aa', fontSize: 12 }}>— 下载部署包 + 本地编译 + 发送到目标主机</span>
+          </div>
+
           <pre style={{
             background: '#0d1520',
             padding: 12,
@@ -161,14 +177,16 @@ export default function ClusterPanel() {
             overflowX: 'auto',
             margin: 0,
           }}>
-{`# 在远程节点上配置 config.yaml:
+{`# 远程节点 config.yaml:
 cluster:
   enabled: true
   role: "node"
   manager_addr: "<管理端IP>:8443"
 
 # 启动蜜罐节点
-./bin/honeypot`}
+./bin/honeypot
+
+# 或使用 Agent 部署面板生成一键拉取/手动部署命令`}
           </pre>
         </div>
       )}

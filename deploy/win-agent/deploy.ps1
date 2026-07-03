@@ -1,20 +1,34 @@
 <#
 .SYNOPSIS
-    Laji-HoneyPot Windows Agent v0.12.0 部署脚本
+    Laji-HoneyPot Windows Agent v0.17.1 部署脚本
 .DESCRIPTION
-    在 Windows 11 (AGENT_IP_PLACEHOLDER) 上部署 Agent 蜜罐节点
-    自动配置防火墙规则，连接 macOS Manager
+    Windows 11 上部署 Agent 蜜罐节点。
+    支持两种模式:
+      1. 一键拉取: .\deploy.ps1 -MgmtUrl "http://MANAGER_IP:8080"
+         (自动从管理端下载配置包+二进制, 完成部署并启动)
+      2. 手动部署: .\deploy.ps1
+         (本地已有 honeypot-agent.exe 和 config.yaml)
 .NOTES
     必须以管理员身份运行 PowerShell
-    需要 honeypot-agent.exe 在同一目录
+.PARAMETER MgmtUrl
+    管理端 URL, 可选。指定后自动从管理端拉取部署包
+.EXAMPLE
+    # 一键拉取部署
+    .\deploy.ps1 -MgmtUrl "http://10.0.0.1:8080"
+.EXAMPLE
+    # 手动部署
+    .\deploy.ps1
 #>
 
+param(
+    [string]$MgmtUrl = ""
+)
+
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "Laji-HoneyPot Agent"
+$Host.UI.RawUI.WindowTitle = "Laji-HoneyPot Agent v0.17.1"
 
 Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host "  Laji-HoneyPot Agent v0.12.0" -ForegroundColor Cyan
-Write-Host "  Manager: $(Get-Content config.yaml | Select-String 'manager_addr')" -ForegroundColor Green
+Write-Host "  Laji-HoneyPot Agent v0.17.1" -ForegroundColor Cyan
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -24,6 +38,39 @@ if (-not $isAdmin) {
     Write-Host "[WARN] 未以管理员运行，防火墙规则配置将跳过" -ForegroundColor Yellow
     Write-Host "       右键 PowerShell → 以管理员身份运行 以获取完整功能" -ForegroundColor Yellow
     Write-Host ""
+}
+
+# ---- 一键拉取模式 ----
+if ($MgmtUrl -ne "") {
+    Write-Host "[INFO] 一键拉取模式 — 从管理端下载部署包..." -ForegroundColor Cyan
+    Write-Host "  管理端: $MgmtUrl" -ForegroundColor Green
+    
+    try {
+        $pkgUrl = "$MgmtUrl/api/cluster/agent/package?os=windows&scenario=full"
+        $pkgFile = "$env:TEMP\honeypot-agent-pkg.zip"
+        
+        Write-Host "  [→] 下载部署包: $pkgUrl"
+        Invoke-WebRequest -Uri $pkgUrl -OutFile $pkgFile -ErrorAction Stop
+        
+        Write-Host "  [→] 解压到当前目录..."
+        Expand-Archive -Path $pkgFile -DestinationPath "." -Force
+        
+        Write-Host "  [OK] 部署包解压完成" -ForegroundColor Green
+        
+        # 下载预编译二进制
+        $binaryUrl = "https://github.com/br0ny4/Laji-HoneyPot/releases/latest/download/honeypot-windows-amd64.exe"
+        Write-Host "  [→] 下载 Agent 二进制..."
+        try {
+            Invoke-WebRequest -Uri $binaryUrl -OutFile "honeypot-agent.exe" -ErrorAction Stop
+            Write-Host "  [OK] 二进制下载完成" -ForegroundColor Green
+        } catch {
+            Write-Host "  [WARN] 二进制下载失败, 需要手动放置 honeypot-agent.exe" -ForegroundColor Yellow
+            Write-Host "  编译命令: GOOS=windows GOARCH=amd64 go build -o honeypot-agent.exe ./cmd/honeypot/"
+        }
+    } catch {
+        Write-Host "  [FAIL] 部署包下载失败: $_" -ForegroundColor Red
+        Write-Host "  回退到手动部署模式..." -ForegroundColor Yellow
+    }
 }
 
 # ---- 查找可执行文件 ----
@@ -39,16 +86,34 @@ foreach ($name in $possibleExes) {
 if (-not $exe) {
     Write-Host "[ERROR] 未找到 honeypot-agent.exe 或 honeypot.exe!" -ForegroundColor Red
     Write-Host ""
-    Write-Host "请将编译好的 Windows Agent 二进制文件放置到当前目录:"
-    Write-Host "  1. 在 macOS 上交叉编译: GOOS=windows GOARCH=amd64 go build -o honeypot-agent.exe ./cmd/honeypot/"
-    Write-Host "  2. 将 honeypot-agent.exe 复制到本目录"
-    Write-Host "  3. 重新运行本脚本"
+    Write-Host "获取二进制文件的方式:" -ForegroundColor Yellow
+    Write-Host "  【方式1: 一键拉取】" -ForegroundColor Cyan
+    Write-Host "    .\deploy.ps1 -MgmtUrl 'http://MANAGER_IP:8080'"
+    Write-Host ""
+    Write-Host "  【方式2: 本地编译】" -ForegroundColor Cyan
+    Write-Host "    在 macOS 上: GOOS=windows GOARCH=amd64 go build -o honeypot-agent.exe ./cmd/honeypot/"
+    Write-Host "    将 honeypot-agent.exe 复制到当前目录"
     Write-Host ""
     pause
     exit 1
 }
 
 Write-Host "[OK] 找到: $exe" -ForegroundColor Green
+
+# ---- 检查 config.yaml ----
+if (-not (Test-Path "config.yaml")) {
+    Write-Host "[WARN] 未找到 config.yaml" -ForegroundColor Yellow
+    if ($MgmtUrl -ne "") {
+        Write-Host "  正在从管理端下载 config.yaml..."
+        $cfgUrl = "$MgmtUrl/api/cluster/agent/package?os=windows"
+        try {
+            Invoke-WebRequest -Uri $cfgUrl -OutFile "config-pkg.zip"
+            Expand-Archive -Path "config-pkg.zip" -DestinationPath "." -Force
+        } catch {
+            Write-Host "  [FAIL] 配置下载失败"
+        }
+    }
+}
 
 # ---- 配置 Windows 防火墙 ----
 if ($isAdmin) {
@@ -86,7 +151,7 @@ if (-not (Test-Path "data")) {
 
 # ---- 启动 Agent ----
 Write-Host ""
-Write-Host "[INFO] 正在启动 Laji-HoneyPot Agent..." -ForegroundColor Green
+Write-Host "[INFO] 正在启动 Laji-HoneyPot Agent v0.17.1..." -ForegroundColor Green
 Write-Host "==============================" -ForegroundColor Cyan
 Write-Host ""
 
