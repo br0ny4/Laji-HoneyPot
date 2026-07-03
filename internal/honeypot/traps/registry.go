@@ -11,12 +11,12 @@ import "slices"
 type TrapScenario string
 
 const (
-	ScenarioWeb            TrapScenario = "web"             // Web 业务场景：仅 HTTP 蜜罐 + 浏览器反制载荷
-	ScenarioDatabase       TrapScenario = "database"        // 数据库场景：MySQL + Redis 蜜罐
-	ScenarioRemoteAccess   TrapScenario = "remote_access"   // 主机远程访问场景：SSH + RDP + FTP 蜜罐
-	ScenarioInfrastructure TrapScenario = "infrastructure"  // 基础设施场景：DNS + LDAP + SMB 蜜罐
-	ScenarioFull           TrapScenario = "full"            // 全量启用（默认，向后兼容）
-	ScenarioCustom         TrapScenario = "custom"          // 自定义选配
+	ScenarioWeb            TrapScenario = "web"            // Web 业务场景：仅 HTTP 蜜罐 + 浏览器反制载荷
+	ScenarioDatabase       TrapScenario = "database"       // 数据库场景：MySQL + Redis 蜜罐
+	ScenarioRemoteAccess   TrapScenario = "remote_access"  // 主机远程访问场景：SSH + RDP + FTP 蜜罐
+	ScenarioInfrastructure TrapScenario = "infrastructure" // 基础设施场景：DNS + LDAP + SMB 蜜罐
+	ScenarioFull           TrapScenario = "full"           // 全量启用（默认，向后兼容）
+	ScenarioCustom         TrapScenario = "custom"         // 自定义选配
 )
 
 // AllScenarios 所有可用的预设场景列表
@@ -62,7 +62,7 @@ type ScenarioInfo struct {
 // 根据部署场景决定启用哪些协议蜜罐服务
 type Registry struct {
 	Scenario       TrapScenario `json:"scenario"`
-	customServices []string     `json:"custom_services,omitempty"`
+	customServices []string     `json:"-"` // 内部字段，不序列化
 }
 
 // New 创建陷阱注册中心

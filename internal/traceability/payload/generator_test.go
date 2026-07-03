@@ -25,6 +25,24 @@ func TestGenerateBrowserFingerprint(t *testing.T) {
 	if !strings.Contains(result.Content, "Laji-HoneyPot") {
 		t.Error("expected content to contain 'Laji-HoneyPot'")
 	}
+	// 验证新增字段
+	for _, field := range []string{
+		"audio",
+		"mathPrecision",
+		"hwConcurrency",
+		"deviceMemory",
+		"platform",
+		"connectionType",
+		"touchSupport",
+		"maxTouchPoints",
+		"adBlocker",
+		"cookieEnabled",
+		"doNotTrack",
+	} {
+		if !strings.Contains(result.Content, field) {
+			t.Errorf("expected content to contain new field '%s'", field)
+		}
+	}
 }
 
 func TestGenerateBrowserExploitChrome(t *testing.T) {

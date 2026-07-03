@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,9 @@ type Engine struct {
 	stack            *tcpstack.Stack
 	udpListener      net.PacketConn
 	activeSvcs       int
+	runningSvcs      []string                                      // 成功启动的服务名列表
+	failedSvcs       []string                                      // 启动失败的服务及原因
+	portOffset       int                                           // 端口偏移量（HP_PORT_OFFSET 环境变量）
 	trapRegistry     *traps.Registry                               // 陷阱模块注册中心（场景化选配）
 	httpSrv          *httpSvc.Server                               // HTTP 蜜罐实例
 	countermeasureFn func(path, userAgent, remoteIP string) string // 面包屑触发的反制 JS 注入回调
@@ -70,6 +74,17 @@ func NewEngine(logger *log.Logger, bus *bus.Bus, st *store.Store) *Engine {
 func (e *Engine) Name() string    { return "honeypot-engine" }
 func (e *Engine) Version() string { return "0.4.0" }
 
+// ServiceStatus 返回蜜罐服务的运行状态
+func (e *Engine) ServiceStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"total":            e.activeSvcs,
+		"running":          e.runningSvcs,
+		"failed":           e.failedSvcs,
+		"scenario":         e.trapRegistry.Scenario,
+		"enabled_services": e.trapRegistry.EnabledServices(),
+	}
+}
+
 func (e *Engine) Init(cfg config.Section) error {
 	e.logger.Info("honeypot engine initializing")
 
@@ -81,6 +96,17 @@ func (e *Engine) Init(cfg config.Section) error {
 		"scenario", e.trapRegistry.Scenario,
 		"enabled_services", e.trapRegistry.EnabledServices(),
 	)
+
+	// 解析 HP_PORT_OFFSET 环境变量，支持手动整体偏移所有端口
+	if offsetStr := os.Getenv("HP_PORT_OFFSET"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil {
+			e.portOffset = o
+			e.logger.Infow("HP_PORT_OFFSET applied, all ports will be shifted",
+				"offset", e.portOffset)
+		} else {
+			e.logger.Warnw("invalid HP_PORT_OFFSET, ignoring", "value", offsetStr)
+		}
+	}
 
 	// HTTP 蜜罐（仅在场景启用时创建）
 	var httpSrv *httpSvc.Server
@@ -149,26 +175,85 @@ func (e *Engine) Init(cfg config.Section) error {
 		if s.port <= 0 {
 			continue
 		}
-		if err := e.stack.Listen(s.port, s.handler); err != nil {
-			e.logger.Warnw("failed to start tcp service", "name", s.name, "port", s.port, "error", err)
+
+		// 应用 HP_PORT_OFFSET 偏移
+		actualPort := s.port + e.portOffset
+
+		// 预检测端口是否可用（端口冲突检测）
+		if !IsPortAvailable(fmt.Sprintf(":%d", actualPort)) {
+			e.logger.Errorw("port conflict detected",
+				"service", s.name, "port", actualPort,
+				"msg", fmt.Sprintf("Port %d (%s) is already in use", actualPort, s.name))
+
+			// 自动递增回退：尝试寻找下一个可用端口
+			fallbackPort := FindAvailablePort(actualPort+1, 100)
+			if fallbackPort > 0 {
+				e.logger.Infow("port escalated due to conflict",
+					"service", s.name,
+					"from", actualPort,
+					"to", fallbackPort,
+					"msg", fmt.Sprintf("%s port escalated from %d to %d due to conflict", s.name, actualPort, fallbackPort))
+				actualPort = fallbackPort
+			} else {
+				e.logger.Errorw("no available port found after escalation",
+					"service", s.name, "original_port", actualPort)
+				e.failedSvcs = append(e.failedSvcs,
+					fmt.Sprintf("%s(:%d): port occupied, no fallback available", s.name, actualPort))
+				continue
+			}
+		}
+
+		if err := e.stack.Listen(actualPort, s.handler); err != nil {
+			e.logger.Errorw("failed to start tcp service", "name", s.name, "port", actualPort, "error", err)
+			e.failedSvcs = append(e.failedSvcs, fmt.Sprintf("%s(:%d): %v", s.name, actualPort, err))
 			continue
 		}
 		e.activeSvcs++
+		e.runningSvcs = append(e.runningSvcs, s.name)
 	}
 
 	// DNS 使用 UDP（按场景选配）
 	if e.trapRegistry.IsServiceEnabled("dns") {
 		if dnsPort := cfg.GetInt("dns_port"); dnsPort > 0 {
 			dnsSrv := dnsSvc.New(e.logger)
-			addr := fmt.Sprintf(":%d", dnsPort)
-			pc, err := net.ListenPacket("udp", addr)
-			if err != nil {
-				e.logger.Warnw("failed to start dns udp", "port", dnsPort, "error", err)
-			} else {
-				e.udpListener = pc
-				e.activeSvcs++
-				go e.udpLoop(pc, func(c net.Conn) { dnsSrv.Handle(c) }, dnsPort)
-				e.logger.Infow("dns honeypot listening", "port", dnsPort, "proto", "udp")
+			actualPort := dnsPort + e.portOffset
+			addr := fmt.Sprintf(":%d", actualPort)
+			dnsFailed := false
+
+			// 预检测 DNS UDP 端口是否可用
+			if !IsPortAvailable(addr) {
+				e.logger.Errorw("port conflict detected",
+					"service", "DNS", "port", actualPort,
+					"msg", fmt.Sprintf("Port %d (DNS/UDP) is already in use", actualPort))
+				fallbackPort := FindAvailablePort(actualPort+1, 100)
+				if fallbackPort > 0 {
+					e.logger.Infow("port escalated due to conflict",
+						"service", "DNS",
+						"from", actualPort,
+						"to", fallbackPort,
+						"msg", fmt.Sprintf("DNS port escalated from %d to %d due to conflict", actualPort, fallbackPort))
+					actualPort = fallbackPort
+					addr = fmt.Sprintf(":%d", actualPort)
+				} else {
+					e.logger.Errorw("no available port found after escalation",
+						"service", "DNS", "original_port", actualPort)
+					e.failedSvcs = append(e.failedSvcs,
+						fmt.Sprintf("DNS(:%d/udp): port occupied, no fallback available", actualPort))
+					dnsFailed = true
+				}
+			}
+
+			if !dnsFailed {
+				pc, err := net.ListenPacket("udp", addr)
+				if err != nil {
+					e.logger.Errorw("failed to start dns udp", "port", actualPort, "error", err)
+					e.failedSvcs = append(e.failedSvcs, fmt.Sprintf("DNS(:%d/udp): %v", actualPort, err))
+				} else {
+					e.udpListener = pc
+					e.activeSvcs++
+					go e.udpLoop(pc, func(c net.Conn) { dnsSrv.Handle(c) }, actualPort)
+					e.logger.Infow("dns honeypot listening", "port", actualPort, "proto", "udp")
+				}
 			}
 		}
 	}
@@ -502,9 +587,10 @@ func (e *Engine) collectProtocolFingerprint(service, host, tlsData string) {
 
 func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
 	e.logger.Warnw("BREADCRUMB TRIGGERED", "remote", remoteIP, "path", path, "ua", userAgent)
-	e.store.RecordAttack(remoteIP, path, userAgent, "breadcrumb_trigger")
+	// 异步记录攻击事件，避免阻塞 TCP 响应
+	go e.store.RecordAttack(remoteIP, path, userAgent, "breadcrumb_trigger")
 	// 标记该IP上次反制措施为有效（攻击者再次触发面包屑说明反制奏效）
-	e.store.MarkCountermeasureEffective(remoteIP)
+	go e.store.MarkCountermeasureEffective(remoteIP)
 	evtData, err := json.Marshal(map[string]interface{}{
 		"remote_ip": remoteIP, "path": path, "user_agent": userAgent,
 	})
@@ -512,8 +598,8 @@ func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
 		e.logger.Warnw("json marshal failed in onBreadcrumb", "error", err)
 		return
 	}
-	// 同步发布 breadcrumb 事件（溯源引擎需即时响应）
-	e.bus.PublishSync("honeypot.breadcrumb", evtData)
+	// 异步发布 breadcrumb 事件，避免阻塞 TCP 响应
+	e.bus.Publish("honeypot.breadcrumb", evtData)
 	e.bus.Publish("honeypot.attack", evtData)
 }
 
@@ -533,6 +619,18 @@ func (e *Engine) SetDecoyPageProvider(fn httpSvc.DecoyPageCallback) {
 	}
 }
 
+// Close 停止所有监听器并释放所有端口。
+// 应在收到 SIGINT/SIGTERM 时调用以确保端口被正确释放。
+func (e *Engine) Close() error {
+	e.logger.Info("releasing all honeypot ports...")
+	e.stack.CloseAll()
+	if e.udpListener != nil {
+		e.udpListener.Close()
+	}
+	e.logger.Info("all ports released")
+	return nil
+}
+
 func (e *Engine) Start() error {
 	e.logger.Info("honeypot engine started")
 	return nil
@@ -540,11 +638,7 @@ func (e *Engine) Start() error {
 
 func (e *Engine) Stop() error {
 	e.logger.Info("honeypot engine stopping")
-	e.stack.CloseAll()
-	if e.udpListener != nil {
-		e.udpListener.Close()
-	}
-	return nil
+	return e.Close()
 }
 
 // GetTrapRegistry 暴露陷阱注册中心（供溯源引擎查询场景信息）

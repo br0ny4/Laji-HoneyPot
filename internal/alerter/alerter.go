@@ -48,12 +48,13 @@ type AlertEvent struct {
 
 // Alerter 多通道告警器
 type Alerter struct {
-	logger    *zap.SugaredLogger
-	channels  []ChannelConfig
-	client    *http.Client
-	mu        sync.Mutex
-	lastAlert map[string]time.Time // key: "type:ip" — 按事件类型+IP 去重限流
-	cooldown  time.Duration        // 同一 IP+事件类型的最小告警间隔
+	logger     *zap.SugaredLogger
+	channels   []ChannelConfig
+	client     *http.Client
+	mu         sync.Mutex
+	lastAlert  map[string]time.Time // key: "type:ip" — 按事件类型+IP 去重限流
+	cooldown   time.Duration        // 同一 IP+事件类型的最小告警间隔
+	webhookCfg *WebhookConfig       // 外部 Webhook 配置
 }
 
 // New 创建告警器
@@ -72,6 +73,11 @@ func (a *Alerter) SetCooldown(d time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cooldown = d
+}
+
+// SetWebhook 设置外部 Webhook 配置
+func (a *Alerter) SetWebhook(cfg *WebhookConfig) {
+	a.webhookCfg = cfg
 }
 
 // ShouldAlert 检查是否应该发送告警（冷却期内跳过）
@@ -119,6 +125,27 @@ func (a *Alerter) Send(event AlertEvent) {
 			a.sendDingTalk(ch.URL, event)
 		case ChannelFeishu:
 			a.sendFeishu(ch.URL, event)
+		}
+	}
+
+	// 通过外部 Webhook 发送 critical/warn 级别告警
+	if a.webhookCfg != nil && a.webhookCfg.Enabled && a.webhookCfg.URL != "" {
+		if event.Level == "critical" || event.Level == "warn" {
+			category := classifyWebhookCategory(event)
+			content := map[string]interface{}{
+				"category":   category,
+				"type":       event.Type,
+				"level":      event.Level,
+				"remote_ip":  event.RemoteIP,
+				"service":    event.Service,
+				"path":       event.Path,
+				"detail":     event.Detail,
+				"user_agent": event.UserAgent,
+				"timestamp":  event.Timestamp.Format("2006-01-02 15:04:05"),
+			}
+			if err := SendWebhookAlert(a.logger, a.webhookCfg, event.Title, content); err != nil {
+				a.logger.Warnw("webhook alert send failed", "error", err)
+			}
 		}
 	}
 }
@@ -304,6 +331,22 @@ func classifySeverity(eventType string) string {
 		return "warn"
 	default:
 		return "info"
+	}
+}
+
+// classifyWebhookCategory 根据告警事件分类 Webhook 类别
+func classifyWebhookCategory(event AlertEvent) string {
+	switch event.Type {
+	case "attack":
+		return "attack"
+	case "scan":
+		return "scan"
+	case "breadcrumb":
+		return "breadcrumb"
+	case "connection":
+		return "connection"
+	default:
+		return "other"
 	}
 }
 

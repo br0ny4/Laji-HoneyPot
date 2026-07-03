@@ -9,6 +9,8 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
+  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-28%2F28%20PASS-brightgreen" alt="Tests" /></a>
+  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.15.0-blue" alt="Version" /></a>
 </p>
 
 ---
@@ -16,6 +18,7 @@
 ## 目录
 
 - [一键部署](#一键部署)
+- [运维管理 CLI](#运维管理-cli)
 - [快速开始](#快速开始)
 - [核心特性](#核心特性)
 - [管理后台](#管理后台)
@@ -61,6 +64,29 @@ bash install.sh
 | 生成配置 | 自动创建 `config.yaml`（如不存在） |
 
 > **Windows 用户**：请使用 Git Bash 或 WSL 运行。原生 CMD/PowerShell 暂不支持。
+
+---
+
+## 运维管理 CLI
+
+`honeypot-ctl` 是管理端的标准化命令行运维工具，支持一键启停、版本更新、状态诊断。
+
+```bash
+# 查看帮助
+./honeypot-ctl help
+
+# 日常运维
+./honeypot-ctl start       # 编译并启动服务（自动后台运行 + PID 管理）
+./honeypot-ctl stop        # 优雅停止服务（10s 超时 → 强制终止）
+./honeypot-ctl restart     # 重启服务
+./honeypot-ctl status      # 查看运行状态（PID / 内存 / API 健康 / 蜜罐服务状态）
+./honeypot-ctl logs 50     # 查看最近 50 行日志
+
+# 一键版本更新
+./honeypot-ctl update      # git pull → 编译 → npm build → 重启
+```
+
+**特性**：彩色输出、错误捕获与日志提示、`API_ADDR` 环境变量支持、PID 文件管理（`.honeypot.pid`）、bash 3.2+ 兼容。
 
 ---
 
@@ -176,7 +202,7 @@ git push origin master
 |------|---------|---------|
 | 屏幕截获 | 50 分 | 5 秒 |
 | 敏感文件扫描 | 30 分 | 60 秒 |
-| 横向网络探测 | 40 分 | 300 秒 |
+| 横向网络探测 | 40 分 | 120 秒 |
 | 浏览器指纹 | 15 分 | 10 秒 |
 | 环境检测 | 20 分 | 30 秒 |
 
@@ -261,13 +287,19 @@ cd web && npm run dev
 
 ### API 认证
 
-管理后台 API 通过 `X-API-Key` Header 认证，默认密钥 `hp-admin-2024`。修改 `config.yaml`：
+管理后台 API 使用 JWT (HS256) 认证体系：
+
+- **Access Token**：15 分钟有效期，用于 API 请求授权
+- **Refresh Token**：24 小时有效期，用于无感续签
+- **JWT Secret**：首次启动自动生成并持久化到 `config.yaml` 的 `jwt_secret` 字段，重启后令牌不失效
+- **密码复杂度**：≥8 字符 + 大写字母 + 小写字母 + 数字 + 特殊字符
 
 ```yaml
-api_key: "your-custom-key"
+# config.yaml
+jwt_secret: ""  # 留空则首次启动自动生成 256-bit 随机密钥
 ```
 
-以下端点无需认证（面向攻击者浏览器自动触发）：`/healthz`、`/api/collect`、`/api/events`、`/api/countermeasure/exfil`
+以下端点无需认证（面向攻击者浏览器自动触发）：`/healthz`、`/api/collect`、`/api/countermeasure/exfil`、`/api/auth/login`
 
 ---
 

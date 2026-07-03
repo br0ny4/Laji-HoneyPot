@@ -2,7 +2,7 @@
 .SYNOPSIS
     Laji-HoneyPot Windows Agent v0.12.0 部署脚本
 .DESCRIPTION
-    在 Windows 11 (10.111.29.4) 上部署 Agent 蜜罐节点
+    在 Windows 11 (AGENT_IP_PLACEHOLDER) 上部署 Agent 蜜罐节点
     自动配置防火墙规则，连接 macOS Manager
 .NOTES
     必须以管理员身份运行 PowerShell

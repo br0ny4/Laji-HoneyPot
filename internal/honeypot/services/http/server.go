@@ -2,6 +2,7 @@ package http
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -226,7 +227,34 @@ func (s *Server) Handle(conn net.Conn, onBreadcrumb BreadcrumbCallback) {
 				"user-agent", ua,
 			)
 			if onBreadcrumb != nil {
-				onBreadcrumb(remote, path, ua)
+				// 异步执行面包屑回调，避免阻塞 TCP 响应
+				go func(r, p, u string) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							s.logger.Errorw("breadcrumb callback panic", "remote", r, "path", p, "panic", rec)
+						}
+					}()
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+
+					done := make(chan struct{}, 1)
+					go func() {
+						defer func() {
+							if rec := recover(); rec != nil {
+								s.logger.Errorw("breadcrumb handler panic", "remote", r, "path", p, "panic", rec)
+							}
+						}()
+						onBreadcrumb(r, p, u)
+						done <- struct{}{}
+					}()
+
+					select {
+					case <-done:
+					case <-ctx.Done():
+						s.logger.Warnw("breadcrumb callback timed out",
+							"remote", r, "path", p, "timeout", "5s")
+					}
+				}(remote, path, ua)
 			}
 		}
 
@@ -441,18 +469,42 @@ func (s *Server) buildResponse(method, path, httpVersion string, headers textpro
 buildHeaders:
 	if breadcrumbTriggered && s.countermeasureCB != nil && strings.HasPrefix(contentType, "text/html") {
 		host, _, _ := net.SplitHostPort(remote)
-		counterJS := s.countermeasureCB(path, ua, host)
-		if idx := strings.LastIndex(body, "</body>"); idx > 0 {
-			body = body[:idx] + counterJS + body[idx:]
+		// 异步获取反制 JS，5 秒超时，超时则跳过反制注入
+		type counterResult struct {
+			js string
 		}
-		// 记录反制事件到持久化存储
-		if s.store != nil && len(counterJS) > 0 {
-			payloadType := detectPayloadType(counterJS)
-			preview := counterJS
-			if len(preview) > 200 {
-				preview = preview[:200] + "..."
+		resultCh := make(chan counterResult, 1)
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					s.logger.Errorw("countermeasure callback panic", "remote", remote, "path", path, "panic", rec)
+				}
+			}()
+			js := s.countermeasureCB(path, ua, host)
+			resultCh <- counterResult{js: js}
+		}()
+
+		select {
+		case res := <-resultCh:
+			counterJS := res.js
+			if counterJS != "" {
+				if idx := strings.LastIndex(body, "</body>"); idx > 0 {
+					body = body[:idx] + counterJS + body[idx:]
+				}
+				// 记录反制事件到持久化存储
+				if s.store != nil {
+					payloadType := detectPayloadType(counterJS)
+					preview := counterJS
+					if len(preview) > 200 {
+						preview = preview[:200] + "..."
+					}
+					go s.store.RecordCountermeasure(host, path, payloadType, preview, ua, 0)
+				}
 			}
-			s.store.RecordCountermeasure(host, path, payloadType, preview, ua, 0)
+		case <-time.After(5 * time.Second):
+			s.logger.Warnw("countermeasure callback timed out, skipping JS injection",
+				"remote", remote, "path", path, "timeout", "5s")
+			// 超时时优雅降级：不注入反制 JS，但面包屑仍已触发
 		}
 	}
 

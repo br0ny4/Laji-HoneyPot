@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api';
+import Skeleton from './Skeleton';
 
 interface AttackEvent {
   id: number;
@@ -22,15 +23,18 @@ export default function AttackPanel() {
   const [attacks, setAttacks] = useState<AttackEvent[]>([]);
   const [limit, setLimit] = useState(50);
   const [selected, setSelected] = useState<AttackEvent | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const fetchAttacks = () => {
+    setLoading(true);
     apiFetch(`/api/attacks?limit=${limit}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((d) => setAttacks(d.attacks || []))
-      .catch((err) => console.error('[AttackPanel] 获取攻击事件失败:', err));
+      .catch((err) => console.error('[AttackPanel] 获取攻击事件失败:', err))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -107,7 +111,11 @@ export default function AttackPanel() {
           </tr>
         </thead>
         <tbody>
-          {attacks.map((a) => (
+          {loading ? (
+            <tr><td colSpan={7}><Skeleton variant="table" rows={5} cols={7} /></td></tr>
+          ) : (
+            <>
+              {attacks.map((a) => (
             <tr key={a.id}>
               <td>{a.id}</td>
               <td className="cell-time">{new Date(a.timestamp).toLocaleString('zh-CN')}</td>
@@ -126,6 +134,8 @@ export default function AttackPanel() {
           ))}
           {attacks.length === 0 && (
             <tr><td colSpan={7} className="empty-hint">暂无攻击事件</td></tr>
+          )}
+            </>
           )}
         </tbody>
       </table>

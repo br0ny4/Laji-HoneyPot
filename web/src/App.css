@@ -1903,3 +1903,116 @@ body {
   color: #94a3b8;
   margin-bottom: 8px;
 }
+
+/* ========== Toast 通知 ========== */
+.toast-notification {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100px);
+  background: #1e293b;
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 9999;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+
+.toast-notification.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ========== Skeleton 骨架屏 ========== */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.skeleton-pulse {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  background: #334155;
+  border-radius: 6px;
+}
+
+/* Card skeleton */
+.skeleton-card {
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+  border: 1px solid #334155;
+}
+
+.skeleton-card-title {
+  height: 14px;
+  width: 50%;
+  margin: 0 auto 12px;
+}
+
+.skeleton-card-value {
+  height: 28px;
+  width: 40%;
+  margin: 0 auto;
+}
+
+.skeleton-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+/* Table skeleton */
+.skeleton-table {
+  background: #1e293b;
+  border-radius: 10px;
+  padding: 16px;
+  border: 1px solid #334155;
+}
+
+.skeleton-table-header {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #334155;
+}
+
+.skeleton-table-row {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.skeleton-th {
+  height: 12px;
+}
+
+.skeleton-td {
+  height: 14px;
+}
+
+/* Text skeleton */
+.skeleton-text-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.skeleton-text-line {
+  height: 12px;
+  border-radius: 4px;
+}
+
+/* Loading container */
+.skeleton-loading-area {
+  padding: 40px 0;
+}

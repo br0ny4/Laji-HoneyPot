@@ -17,25 +17,25 @@ import (
 
 // AgentDeployRequest 前端提交的 Agent 部署配置请求
 type AgentDeployRequest struct {
-	ManagerAddr    string              `json:"manager_addr"`    // 管理端地址 (必填)
-	Scenario       traps.TrapScenario  `json:"scenario"`        // 陷阱场景选配
-	CustomServices []string            `json:"custom_services"` // 自定义服务 (scenario=custom 时生效)
-	TLSInsecure    bool                `json:"tls_insecure"`    // 跳过 TLS 验证 (仅测试用)
-	BinarySource   string              `json:"binary_source"`   // 二进制下载来源: release | build | url
-	CustomURL      string              `json:"custom_url"`      // 自定义下载 URL (binary_source=url 时生效)
-	NodeName       string              `json:"node_name"`       // 节点显示名称 (可选)
+	ManagerAddr    string             `json:"manager_addr"`    // 管理端地址 (必填)
+	Scenario       traps.TrapScenario `json:"scenario"`        // 陷阱场景选配
+	CustomServices []string           `json:"custom_services"` // 自定义服务 (scenario=custom 时生效)
+	TLSInsecure    bool               `json:"tls_insecure"`    // 跳过 TLS 验证 (仅测试用)
+	BinarySource   string             `json:"binary_source"`   // 二进制下载来源: release | build | url
+	CustomURL      string             `json:"custom_url"`      // 自定义下载 URL (binary_source=url 时生效)
+	NodeName       string             `json:"node_name"`       // 节点显示名称 (可选)
 }
 
 // AgentDeployArtifact Agent 部署产出物
 type AgentDeployArtifact struct {
-	ManagerAddr   string              `json:"manager_addr"`   // 管理端地址
-	Scenario      traps.TrapScenario  `json:"scenario"`       // 陷阱场景
-	EnabledSvcs   []string            `json:"enabled_svcs"`   // 启用的服务列表
-	ConfigYAML    string              `json:"config_yaml"`    // 生成的 config.yaml 内容
-	CLICommand    string              `json:"cli_command"`    // 一键命令行（适用于目标主机直接执行）
-	DeployScript  string              `json:"deploy_script"`  // 完整部署脚本 (bash)
-	DockerCommand string              `json:"docker_command"` // Docker 部署命令 (可选)
-	VerifyHint    string              `json:"verify_hint"`    // 注册校验提示
+	ManagerAddr   string             `json:"manager_addr"`   // 管理端地址
+	Scenario      traps.TrapScenario `json:"scenario"`       // 陷阱场景
+	EnabledSvcs   []string           `json:"enabled_svcs"`   // 启用的服务列表
+	ConfigYAML    string             `json:"config_yaml"`    // 生成的 config.yaml 内容
+	CLICommand    string             `json:"cli_command"`    // 一键命令行（适用于目标主机直接执行）
+	DeployScript  string             `json:"deploy_script"`  // 完整部署脚本 (bash)
+	DockerCommand string             `json:"docker_command"` // Docker 部署命令 (可选)
+	VerifyHint    string             `json:"verify_hint"`    // 注册校验提示
 }
 
 // BinarySource 二进制获取方式
@@ -49,8 +49,8 @@ const (
 
 // Generator Agent 生成引擎
 type Generator struct {
-	Version   string // 当前版本号
-	RepoURL   string // 源码仓库地址 (用于 go build / release download)
+	Version    string // 当前版本号
+	RepoURL    string // 源码仓库地址 (用于 go build / release download)
 	ReleaseURL string // Release 下载基础 URL
 }
 
@@ -150,7 +150,7 @@ cluster:
 
 api:
   addr: ":8080"
-  api_key: "hp-agent-2024"
+  api_key: "YOUR_AGENT_API_KEY"
   log_level: "info"
 
 data_dir: "./data"

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
+import Skeleton from './Skeleton';
 
 interface ProfileTag {
   category: string;
@@ -165,7 +166,25 @@ export default function AttackerProfilePanel() {
     tags.filter((t) => t.category === cat);
 
   if (loading && profiles.length === 0) {
-    return <div className="loading">加载攻击者画像数据中...</div>;
+    return (
+      <div>
+        <div className="profile-stats-grid">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} variant="card" />
+          ))}
+        </div>
+        <div className="panel-header">
+          <h3 className="section-title" style={{ margin: 0 }}>攻击者画像</h3>
+        </div>
+        <div className="profile-list">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="profile-card" style={{ padding: 16 }}>
+              <Skeleton variant="text" rows={3} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (

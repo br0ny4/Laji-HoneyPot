@@ -4,9 +4,11 @@
 # ==========================================
 set -e
 
-MGR_TRAP="http://10.111.31.103:8081"
-AGENT_TRAP="http://10.111.29.4:8081"
-MGR_API="http://10.111.31.103:8080"
+MANAGER_IP="${MANAGER_IP:-127.0.0.1}"
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
+MGR_TRAP="http://${MANAGER_IP}:8081"
+AGENT_TRAP="http://${AGENT_IP}:8081"
+MGR_API="http://${MANAGER_IP}:8080"
 KEY="hp-admin-2024"
 RESULTS="/tmp/traceability_results.txt"
 PASS=0; FAIL=0

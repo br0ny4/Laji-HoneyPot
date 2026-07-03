@@ -133,7 +133,7 @@ SC.snapshot=function(){
   if(!SC.running)return;
   var result=SC.captureViaCanvas();
   var data={
-    t:'screen_cap',ts:Date.now(),idx:SC.idx++,sid:SC.sessionId,
+    t:'screen_capture',ts:Date.now(),idx:SC.idx++,sid:SC.sessionId,
     screen:SC.screenInfo,window:SC.windowInfo,gpu:SC.gpuInfo,
     caps:SC.caps,mediaDevices:SC.mediaDevices,encoders:SC.videoEncoders,
     viewport:result?{w:result.width,h:result.height,method:result.method}:null,

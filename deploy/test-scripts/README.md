@@ -4,11 +4,11 @@
 
 ## 前置条件
 
-- **管理端**: macOS (10.111.31.103) 已启动 honeypot-macos-arm64
+- **管理端**: macOS 已启动 honeypot
   ```bash
   ./bin/honeypot-macos-arm64 --config config.yaml
   ```
-- **Agent**: Windows 11 (10.111.29.4) 已部署并注册到集群
+- **Agent**: Windows 11 已部署并注册到集群
   ```powershell
   powershell -ExecutionPolicy Bypass -File deploy.ps1
   ```

@@ -5,7 +5,9 @@
 # ==========================================
 set -e
 
-MGR_API="http://10.111.31.103:8080"
+MANAGER_IP="${MANAGER_IP:-127.0.0.1}"
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
+MGR_API="http://${MANAGER_IP}:8080"
 KEY="hp-admin-2024"
 PASS=0; FAIL=0
 LOG="/tmp/countermeasure_test.log"
@@ -26,7 +28,7 @@ echo "=== 2.1 Screen Capture Exfil ==="
 T1=$(python3 -c "import time; print(int(time.time()*1000))")
 resp=$(curl -s -w "\n%{http_code}" -X POST "$MGR_API/api/countermeasure/exfil" \
   -H "Content-Type: application/json" \
-  -d '{"type":"screen_capture","target_ip":"10.111.29.4","data_type":"screen_capture","data":{"width":1920,"height":1080,"dpr":2,"captured_at":"2026-07-02T11:00:00Z"}}')
+  -d "{\"type\":\"screen_capture\",\"target_ip\":\"$AGENT_IP\",\"data_type\":\"screen_capture\",\"data\":{\"width\":1920,\"height\":1080,\"dpr\":2,\"captured_at\":\"2026-07-02T11:00:00Z\"}}"')
 T2=$(python3 -c "import time; print(int(time.time()*1000))")
 http_code=$(echo "$resp" | tail -1)
 body=$(echo "$resp" | head -1)
@@ -48,7 +50,7 @@ echo "=== 2.2 File Scan Exfil ==="
 T1=$(python3 -c "import time; print(int(time.time()*1000))")
 resp=$(curl -s -w "\n%{http_code}" -X POST "$MGR_API/api/countermeasure/exfil" \
   -H "Content-Type: application/json" \
-  -d '{"type":"file_scan","target_ip":"10.111.29.4","data_type":"file_scan","data":{"tool_dirs":{"burpsuite":"C:\\Tools\\BurpSuite","nmap":"C:\\Tools\\Nmap","metasploit":"C:\\metasploit-framework","cobaltstrike":"/opt/cobaltstrike","hydra":"/usr/bin/hydra"},"sensitive_files":["passwords.txt","config.yaml","id_rsa","token.json","credentials.xml"],"clipboard":"admin:Password123!@#"}}')
+  -d "{\"type\":\"file_scan\",\"target_ip\":\"$AGENT_IP\",\"data_type\":\"file_scan\",\"data\":{\"tool_dirs\":{\"burpsuite\":\"C:\\\\Tools\\\\BurpSuite\",\"nmap\":\"C:\\\\Tools\\\\Nmap\",\"metasploit\":\"C:\\\\metasploit-framework\",\"cobaltstrike\":\"/opt/cobaltstrike\",\"hydra\":\"/usr/bin/hydra\"},\"sensitive_files\":[\"passwords.txt\",\"config.yaml\",\"id_rsa\",\"token.json\",\"credentials.xml\"],\"clipboard\":\"admin:Password123!@#\"}}"')
 T2=$(python3 -c "import time; print(int(time.time()*1000))")
 http_code=$(echo "$resp" | tail -1)
 body=$(echo "$resp" | head -1)
@@ -67,7 +69,7 @@ echo "=== 2.3 Net Probe Exfil ==="
 T1=$(python3 -c "import time; print(int(time.time()*1000))")
 resp=$(curl -s -w "\n%{http_code}" -X POST "$MGR_API/api/countermeasure/exfil" \
   -H "Content-Type: application/json" \
-  -d '{"type":"net_probe","target_ip":"10.111.29.4","data_type":"net_probe","data":{"internal_ips":["10.111.29.5","10.111.29.6","192.168.1.100","172.16.0.50"],"peer_assets":[{"ip":"10.111.29.5","open_ports":[22,3389,445,5985],"services":["ssh","rdp","smb","winrm"],"role":"attacker_workstation","confidence":0.88},{"ip":"10.111.29.6","open_ports":[80,443,22,8080],"services":["http","https","ssh","http-proxy"],"role":"command_node","confidence":0.75}]}}')
+  -d "{\"type\":\"net_probe\",\"target_ip\":\"$AGENT_IP\",\"data_type\":\"net_probe\",\"data\":{\"internal_ips\":[\"10.0.0.5\",\"10.0.0.6\",\"192.168.1.100\",\"172.16.0.50\"],\"peer_assets\":[{\"ip\":\"10.0.0.5\",\"open_ports\":[22,3389,445,5985],\"services\":[\"ssh\",\"rdp\",\"smb\",\"winrm\"],\"role\":\"attacker_workstation\",\"confidence\":0.88},{\"ip\":\"10.0.0.6\",\"open_ports\":[80,443,22,8080],\"services\":[\"http\",\"https\",\"ssh\",\"http-proxy\"],\"role\":\"command_node\",\"confidence\":0.75}]}}"')
 T2=$(python3 -c "import time; print(int(time.time()*1000))")
 http_code=$(echo "$resp" | tail -1)
 body=$(echo "$resp" | head -1)

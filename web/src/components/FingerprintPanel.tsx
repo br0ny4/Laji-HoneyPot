@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { apiFetch } from '../api';
+import Skeleton from './Skeleton';
 
 interface Fingerprint {
   id: number;
@@ -18,15 +19,18 @@ export default function FingerprintPanel() {
   const [sortField, setSortField] = useState<'time' | 'ip'>('time');
   const [viewMode, setViewMode] = useState<'list' | 'grouped'>('grouped');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
 
   const fetchFps = () => {
+    setLoading(true);
     apiFetch(`/api/fingerprints?limit=${limit}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((d) => setFps(d.fingerprints || []))
-      .catch((err) => console.error('[FingerprintPanel] 获取指纹失败:', err));
+      .catch((err) => console.error('[FingerprintPanel] 获取指纹失败:', err))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -156,6 +160,13 @@ export default function FingerprintPanel() {
           <button className="btn-refresh" onClick={fetchFps}>刷新</button>
         </div>
       </div>
+
+      {loading && fps.length === 0 && (
+        <div className="skeleton-loading-area">
+          <Skeleton variant="text" rows={3} />
+          <Skeleton variant="table" rows={5} cols={4} />
+        </div>
+      )}
 
       {/* 指纹详情模态框 */}
       {selected && (

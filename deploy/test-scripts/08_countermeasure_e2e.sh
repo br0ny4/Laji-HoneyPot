@@ -8,7 +8,8 @@ set -e
 
 MGR_API="${MGR_API:-http://localhost:8080}"
 KEY="${KEY:-hp-admin-2024}"
-TARGET_IP="${TARGET_IP:-10.111.29.4}"
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
+TARGET_IP="${TARGET_IP:-${AGENT_IP}}"
 PASS=0; FAIL=0; SKIP=0
 LOG="/tmp/countermeasure_e2e.log"
 REPORT_DIR="/tmp/honeypot_e2e_report"

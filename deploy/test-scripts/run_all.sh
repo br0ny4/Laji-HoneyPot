@@ -21,7 +21,7 @@ set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 MGR="${1:-http://localhost:8080}"
-AGENT="${2:-10.111.29.4}"
+AGENT="${2:-127.0.0.1}"
 
 # 解析参数
 while [ $# -gt 0 ]; do

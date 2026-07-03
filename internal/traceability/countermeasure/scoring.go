@@ -10,17 +10,18 @@ import (
 // ScoringEngine 防守方得分评估引擎
 // 将所有反制获取的攻击方情报接入得分体系
 type ScoringEngine struct {
-	mu         sync.RWMutex
-	logger     *log.Logger
-	scoreboard *Scoreboard
-	auditTrail *AuditTrail
-	cooldowns  map[string]map[OpType]time.Time // targetIP -> opType -> lastExec
+	mu                sync.RWMutex
+	logger            *log.Logger
+	scoreboard        *Scoreboard
+	auditTrail        *AuditTrail
+	cooldowns         map[string]map[OpType]time.Time // targetIP -> opType -> lastExec
+	cooldownOverrides map[OpType]int                  // opType -> override seconds, nil=use default
 }
 
 // NewScoringEngine 创建得分引擎
 func NewScoringEngine(logger *log.Logger, audit *AuditTrail) *ScoringEngine {
 	return &ScoringEngine{
-		logger:    logger,
+		logger:     logger,
 		auditTrail: audit,
 		scoreboard: &Scoreboard{
 			ByCategory:    make(map[OpType]int),
@@ -130,7 +131,27 @@ func (e *ScoringEngine) setCooldown(targetIP string, opType OpType, cooldownSec 
 	if e.cooldowns[targetIP] == nil {
 		e.cooldowns[targetIP] = make(map[OpType]time.Time)
 	}
+	// 检查冷却时间覆盖
+	if sec, ok := e.cooldownOverrides[opType]; ok {
+		cooldownSec = sec
+	}
 	e.cooldowns[targetIP][opType] = time.Now().Add(time.Duration(cooldownSec) * time.Second)
+}
+
+// SetCooldownOverride 设置特定操作类型的冷却时间覆盖（秒）
+// 运行时动态调整冷却策略，seconds<=0 则移除覆盖
+func (e *ScoringEngine) SetCooldownOverride(opType OpType, seconds int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cooldownOverrides == nil {
+		e.cooldownOverrides = make(map[OpType]int)
+	}
+	if seconds <= 0 {
+		delete(e.cooldownOverrides, opType)
+	} else {
+		e.cooldownOverrides[opType] = seconds
+	}
+	e.logger.Infow("cooldown override updated", "op", opType, "seconds", seconds)
 }
 
 func (e *ScoringEngine) generateAuditRef(targetIP string, opType OpType) string {

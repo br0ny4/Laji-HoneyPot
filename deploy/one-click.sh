@@ -29,13 +29,15 @@ echo -e "${CYAN}"
 echo "  ╔══════════════════════════════════════════════════╗"
 echo "  ║   Laji-HoneyPot 一键部署 + 全量测试 v0.12.0       ║"
 echo "  ║   macOS M1 → 管理端/攻击者                       ║"
-echo "  ║   Win11 10.111.29.4 → Agent                     ║"
+echo "  ║   Win11 Agent → Agent                       ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
 MANAGER_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "localhost")
 info "本机IP: ${CYAN}$MANAGER_IP${NC}"
 info "项目目录: $SCRIPT_DIR"
+
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
 
 #========================================================================
 # Step 1: 编译后端
@@ -143,7 +145,7 @@ HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/
 echo -n "  [Q2] 截屏外传 (50pts)... "
 SCORE=$(curl -s -X POST http://localhost:8080/api/countermeasure/exfil \
     -H "Content-Type: application/json" \
-    -d '{"type":"screen_capture","target_ip":"10.111.29.4","data_type":"screen_capture","data":{"width":1920,"height":1080,"dpr":2,"format":"jpeg","captured_at":"2026-07-02T10:00:00Z","image":"base64_fake"}}' 2>/dev/null \
+    -d "{\"type\":\"screen_capture\",\"target_ip\":\"$AGENT_IP\",\"data_type\":\"screen_capture\",\"data\":{\"width\":1920,\"height\":1080,\"dpr\":2,\"format\":\"jpeg\",\"captured_at\":\"2026-07-02T10:00:00Z\",\"image\":\"base64_fake\"}}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('score',0))" 2>/dev/null)
 [ "$SCORE" -ge 50 ] && echo -e "${GREEN}PASS (score=$SCORE)${NC}" && ((PASS++)) || echo -e "${RED}FAIL (score=$SCORE)${NC}" && ((FAIL++))
 
@@ -151,7 +153,7 @@ SCORE=$(curl -s -X POST http://localhost:8080/api/countermeasure/exfil \
 echo -n "  [Q3] 文件扫描外传 (30pts)... "
 SCORE=$(curl -s -X POST http://localhost:8080/api/countermeasure/exfil \
     -H "Content-Type: application/json" \
-    -d '{"type":"file_scan","target_ip":"10.111.29.4","data_type":"file_scan","data":[{"path":"C:\\passwords.txt","name":"passwords.txt","size":1024,"category":"credentials","sensitive":true,"preview":"admin:p@ssw0rd"}]}' 2>/dev/null \
+    -d "{\"type\":\"file_scan\",\"target_ip\":\"$AGENT_IP\",\"data_type\":\"file_scan\",\"data\":[{\"path\":\"C:\\\\passwords.txt\",\"name\":\"passwords.txt\",\"size\":1024,\"category\":\"credentials\",\"sensitive\":true,\"preview\":\"admin:p@ssw0rd\"}]}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('score',0))" 2>/dev/null)
 [ "$SCORE" -ge 30 ] && echo -e "${GREEN}PASS (score=$SCORE)${NC}" && ((PASS++)) || echo -e "${RED}FAIL (score=$SCORE)${NC}" && ((FAIL++))
 
@@ -159,7 +161,7 @@ SCORE=$(curl -s -X POST http://localhost:8080/api/countermeasure/exfil \
 echo -n "  [Q4] 网络探测外传 (40pts)... "
 SCORE=$(curl -s -X POST http://localhost:8080/api/countermeasure/exfil \
     -H "Content-Type: application/json" \
-    -d '{"type":"net_probe","target_ip":"10.111.29.4","data_type":"net_probe","data":{"internal_ips":["10.111.29.4","10.111.29.5"],"peer_assets":[{"ip":"10.111.29.5","open_ports":[22,3389],"services":["ssh","rdp"],"role":"attacker_workstation","confidence":0.85}]}}' 2>/dev/null \
+    -d "{\"type\":\"net_probe\",\"target_ip\":\"$AGENT_IP\",\"data_type\":\"net_probe\",\"data\":{\"internal_ips\":[\"$AGENT_IP\",\"10.0.0.5\"],\"peer_assets\":[{\"ip\":\"10.0.0.5\",\"open_ports\":[22,3389],\"services\":[\"ssh\",\"rdp\"],\"role\":\"attacker_workstation\",\"confidence\":0.85}]}}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('score',0))" 2>/dev/null)
 [ "$SCORE" -ge 40 ] && echo -e "${GREEN}PASS (score=$SCORE)${NC}" && ((PASS++)) || echo -e "${RED}FAIL (score=$SCORE)${NC}" && ((FAIL++))
 

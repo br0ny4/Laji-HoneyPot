@@ -1,0 +1,41 @@
+chore: v0.13.0 - v0.15.0 three-iteration merge
+
+v0.13.0 - Bug Fixes & API Completion:
+- P1: VulnDB API multi-dimension filtering (tool/cve/exploit_type/active)
+- P1: /api/services/status endpoint for honeypot service health
+- P1: /api/stats/dashboard alias route
+- P1: Service startup failure Errorw logging + failedSvcs tracking
+- P1: Handler() nil authMgr guard + server_test 19-test rewrite
+- P2: /api/cluster/events aggregation (ring buffer + topic filter)
+- P2: Agent topology node auto-registration + service edges
+
+v0.14.0 - Security Hardening & Frontend UX:
+- P0: JWT Secret persistence (config.yaml auto-generate/load, survives restart)
+- P0: Login logger type assertion fix (*log.Logger)
+- P0: Breadcrumb HTTP callback async (goroutine + 5s timeout + graceful degrade)
+- P0: Password complexity enforcement (upper+lower+digit+special, >=8 chars)
+- P1: Alert channels: DingTalk/Feishu Webhook + HMAC-SHA256 signing
+- P1: Frontend token expiry Toast + Loading skeleton screens (card/table/text)
+- feat: honeypot-ctl CLI tool (start/stop/restart/status/update/logs)
+- chore: Full-project sensitive data cleanup (IPs->placeholders, paths->$PROJECT_ROOT)
+
+v0.15.0 - Traceability Deep Upgrade:
+- P0: Canvas/WebGL fingerprint 9->20 dimensions (AudioContext/Math/touch/adblock)
+- P1: Non-browser UA server-side fallback (extractHeaderFingerprint)
+- P1: Burp payload naming unified (screen_cap -> screen_capture)
+- P2: net_probe cooldown 300s->120s + SetCooldownOverride() runtime method
+
+Agent Port Conflict Solution:
+- portcheck.go: IsPortAvailable/FindAvailablePort/CheckServicePorts
+- HP_PORT_OFFSET env var for port shifting + auto-fallback
+- main.go: Graceful Shutdown signal handling (SIGINT/SIGTERM)
+
+Competitive Analysis:
+- docs/HONEYPOT_ANALYSIS.md: 15 honeypot comparison + P0-P3 roadmap
+
+Documentation:
+- README.md overhaul (JWT auth/CLI tool/version/fingerprint updates)
+- ITERATION_v0.13.0.md / v0.14.0.md / v0.15.0.md iteration reports
+- ISSUES.md: TODO-001/003/004/012/013/014/016/021/023-027 marked resolved
+
+Tests: 28/28 packages PASS, go vet: 0 warnings, frontend build: 1327 modules

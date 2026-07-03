@@ -27,6 +27,14 @@ type ClusterConfig struct {
 	TLSInsecure bool   `yaml:"tls_insecure"` // 跳过 TLS 验证（测试环境）
 }
 
+// WebhookConfig Webhook 告警配置
+type WebhookConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Type    string `yaml:"type"`
+	URL     string `yaml:"url"`
+	Secret  string `yaml:"secret"`
+}
+
 // Config 顶层配置结构
 type Config struct {
 	LogLevel      string               `yaml:"log_level"`
@@ -34,8 +42,10 @@ type Config struct {
 	APIAddr       string               `yaml:"api_addr"`
 	DataDir       string               `yaml:"data_dir"`
 	APIKey        string               `yaml:"api_key"`
+	JWTSecret     string               `yaml:"jwt_secret"`
 	Cluster       ClusterConfig        `yaml:"cluster"`
 	AlertChannels []AlertChannelConfig `yaml:"alerts,omitempty"`
+	Webhook       *WebhookConfig       `yaml:"webhook,omitempty"`
 }
 
 // Section 插件级配置，支持任意键值对
@@ -85,6 +95,19 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("HP_API_KEY"); v != "" {
 		cfg.APIKey = v
 	}
+}
+
+// Save 将配置序列化并写回配置文件（默认 config.yaml）
+func Save(cfg *Config, paths ...string) error {
+	p := "config.yaml"
+	if len(paths) > 0 {
+		p = paths[0]
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, data, 0644)
 }
 
 // Get 从 Section 中安全获取字符串值

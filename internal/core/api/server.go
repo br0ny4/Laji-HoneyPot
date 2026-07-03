@@ -20,6 +20,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
+	"github.com/Laji-HoneyPot/honeypot/internal/honeypot"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/countermeasure"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/vulndb"
@@ -43,9 +44,12 @@ type Server struct {
 	clusterGen      *cluster.Generator   // Agent 生成引擎 (可选)
 	trapConfigData  []byte               // 陷阱配置 JSON 缓存（启动时写入，只读）
 	traceEngine     *traceability.Engine // 溯源反制引擎（深度反制API）
+	hpEngine        *honeypot.Engine     // 蜜罐引擎（服务状态查询）
 	mux             *http.ServeMux
 	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
 	startTime       time.Time
+	clusterEvents   []cluster.ClusterEvent // 集群事件缓冲区（最近 N 条）
+	eventsMu        sync.RWMutex
 }
 
 // NewServer 创建 API 服务器
@@ -78,11 +82,27 @@ func (s *Server) SetFrontendHandler(h http.Handler) {
 // SetClusterManager 设置集群管理端（由 main 注入）
 func (s *Server) SetClusterManager(mgr *cluster.Manager) {
 	s.clusterMgr = mgr
+	// 启动集群事件消费协程——将 EventCh 中的事件缓冲到内存供 API 查询
+	go s.consumeClusterEvents()
 }
 
 // SetClusterGenerator 设置 Agent 生成引擎（由 main 注入）
 func (s *Server) SetClusterGenerator(gen *cluster.Generator) {
 	s.clusterGen = gen
+}
+
+// consumeClusterEvents 消费集群 EventCh 中的事件并缓冲到内存（最多保留 500 条）
+func (s *Server) consumeClusterEvents() {
+	const maxEvents = 500
+	for evt := range s.clusterMgr.EventCh {
+		s.eventsMu.Lock()
+		s.clusterEvents = append(s.clusterEvents, evt)
+		if len(s.clusterEvents) > maxEvents {
+			// 环形丢弃旧事件
+			s.clusterEvents = s.clusterEvents[len(s.clusterEvents)-maxEvents:]
+		}
+		s.eventsMu.Unlock()
+	}
 }
 
 // SetTrapConfig 设置陷阱配置数据（由 main 在启动时注入，用于 /api/traps/config 接口）
@@ -106,10 +126,16 @@ func (s *Server) SetTraceEngine(engine *traceability.Engine) {
 	}
 }
 
+// SetHoneypotEngine 设置蜜罐引擎（由 main 注入，用于服务状态 API）
+func (s *Server) SetHoneypotEngine(engine *honeypot.Engine) {
+	s.hpEngine = engine
+}
+
 func (s *Server) registerRoutes() {
 	// 仪表盘
 	s.mux.HandleFunc("/api/stats", s.handleStats)
 	s.mux.HandleFunc("/api/stats/detailed", s.handleDetailedStats)
+	s.mux.HandleFunc("/api/stats/dashboard", s.handleDetailedStats) // 别名,前端仪表盘用
 	// 连接列表
 	s.mux.HandleFunc("/api/connections", s.handleConnections)
 	// 攻击事件
@@ -131,6 +157,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/metrics", s.handleMetrics)
 	// 漏洞数据库
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
+	// 蜜罐服务运行状态
+	s.mux.HandleFunc("/api/services/status", s.handleServiceStatus)
 	// 健康检查
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 
@@ -155,6 +183,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/cluster/nodes", s.handleClusterNodes)
 	// Agent 生成引擎
 	s.mux.HandleFunc("/api/cluster/agent/generate", s.handleAgentGenerate)
+	// 集群事件聚合
+	s.mux.HandleFunc("/api/cluster/events", s.handleClusterEvents)
 	// 陷阱配置
 	s.mux.HandleFunc("/api/traps/config", s.handleTrapConfig)
 	// 深度反制 — 植入体数据回传
@@ -208,7 +238,13 @@ func (s *Server) registerRoutes() {
 // Handler 返回带安全中间件链的 http.Handler
 // 链式顺序: 请求日志 → CORS白名单 → JWT认证 → 速率限制
 func (s *Server) Handler() http.Handler {
-	return requestLogMiddleware(s.logger, corsMiddleware(s.authManager.JWTAuthMiddleware(rateLimitMiddleware(s.mux))))
+	var authMW func(http.Handler) http.Handler
+	if s.authManager != nil {
+		authMW = s.authManager.JWTAuthMiddleware
+	} else {
+		authMW = func(next http.Handler) http.Handler { return next }
+	}
+	return requestLogMiddleware(s.logger, corsMiddleware(authMW(rateLimitMiddleware(s.mux))))
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -279,7 +315,38 @@ func (s *Server) handleAttacks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleVulns(w http.ResponseWriter, r *http.Request) {
-	vulns := s.vulnDB.All()
+	q := r.URL.Query()
+	tool := q.Get("tool")
+	exploitType := q.Get("exploit_type")
+	cve := q.Get("cve")
+	active := q.Get("active")
+
+	var vulns []*vulndb.VulnEntry
+
+	switch {
+	case cve != "":
+		if entry, ok := s.vulnDB.Get(cve); ok {
+			vulns = []*vulndb.VulnEntry{entry}
+		}
+	case tool != "" && exploitType != "":
+		vulns = s.vulnDB.FindByToolAndExploitType(tool, vulndb.ExploitType(exploitType))
+	case tool != "":
+		vulns = s.vulnDB.FindByTool(tool)
+	case exploitType != "" && active == "true":
+		all := s.vulnDB.FindByExploitType(vulndb.ExploitType(exploitType))
+		for _, e := range all {
+			if e.IsActive {
+				vulns = append(vulns, e)
+			}
+		}
+	case exploitType != "":
+		vulns = s.vulnDB.FindByExploitType(vulndb.ExploitType(exploitType))
+	case active == "true":
+		vulns = s.vulnDB.FindActive()
+	default:
+		vulns = s.vulnDB.All()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"total": len(vulns),
 		"vulns": vulns,
@@ -317,6 +384,49 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
+
+	// 合并集群 Agent 节点到拓扑
+	if s.clusterMgr != nil {
+		nodes := s.clusterMgr.GetNodes()
+		for _, n := range nodes {
+			if !n.Online {
+				continue
+			}
+			info := s.clusterMgr.GetNodeInfo(n.NodeID)
+			if info == nil {
+				continue
+			}
+			// 添加 Agent 节点
+			agentNodeID := "agent_" + n.NodeID
+			agentLabel := info.Hostname
+			if agentLabel == "" {
+				agentLabel = info.IP
+			}
+			td.Nodes = append(td.Nodes, store.TopoNode{
+				ID:     agentNodeID,
+				Label:  agentLabel,
+				Type:   "agent",
+				IP:     info.IP,
+				Status: "online",
+				Data: map[string]interface{}{
+					"node_id":  info.NodeID,
+					"services": info.Services,
+					"os":       info.OS,
+					"version":  info.Version,
+				},
+			})
+			// 为 Agent 的每个蜜罐服务创建与蜜罐节点的边
+			for _, svc := range info.Services {
+				td.Edges = append(td.Edges, store.TopoEdge{
+					Source:   agentNodeID,
+					Target:   "hp_" + strings.ToLower(svc),
+					Label:    "exposes " + svc,
+					EdgeType: "agent_service",
+				})
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, td)
 }
 
@@ -349,6 +459,15 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		info["attackers_today"] = stats.Attackers
 	}
 	writeJSON(w, http.StatusOK, info)
+}
+
+func (s *Server) handleServiceStatus(w http.ResponseWriter, r *http.Request) {
+	if s.hpEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "honeypot engine not available"})
+		return
+	}
+	status := s.hpEngine.ServiceStatus()
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) handleCountermeasures(w http.ResponseWriter, r *http.Request) {
@@ -448,6 +567,21 @@ func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
 		rawData = "{}"
 	}
 
+	// 解析指纹 JSON，如果数据稀疏则从 HTTP 头提取回退数据（针对非浏览器工具）
+	var fpData map[string]interface{}
+	if err := json.Unmarshal([]byte(rawData), &fpData); err != nil {
+		fpData = make(map[string]interface{})
+	}
+	if len(fpData) <= 2 {
+		headerFP := extractHeaderFingerprint(r)
+		for k, v := range headerFP {
+			fpData[k] = v
+		}
+		if enhanced, err := json.Marshal(fpData); err == nil {
+			rawData = string(enhanced)
+		}
+	}
+
 	// 存储指纹数据
 	if _, err := s.store.RecordFingerprint(trackingID, remoteIP, userAgent, rawData); err != nil {
 		s.logger.Errorw("fingerprint store failed", "error", err)
@@ -477,6 +611,88 @@ func newUUID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// extractHeaderFingerprint 从 HTTP 请求头提取回退指纹数据
+// 用于非浏览器工具（curl、sqlmap、nmap 等）访问时，JS 未执行的情况
+func extractHeaderFingerprint(r *http.Request) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	ua := r.Header.Get("User-Agent")
+	if ua != "" {
+		result["tool_name"] = detectToolFromUA(ua)
+	}
+
+	if al := r.Header.Get("Accept-Language"); al != "" {
+		parts := strings.Split(al, ",")
+		langs := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if idx := strings.Index(p, ";"); idx > 0 {
+				p = p[:idx]
+			}
+			if p != "" {
+				langs = append(langs, p)
+			}
+		}
+		result["languages"] = langs
+	}
+
+	if ref := r.Header.Get("Referer"); ref != "" {
+		result["referrer"] = ref
+	}
+
+	return result
+}
+
+// detectToolFromUA 根据 User-Agent 识别攻击工具
+// 逻辑与 fingerprint/collector.go 的 DetectTool 保持一致
+func detectToolFromUA(ua string) string {
+	if ua == "" {
+		return "unknown"
+	}
+	// Burp Suite
+	if strings.Contains(ua, "Burp Suite") || strings.Contains(ua, "Java/1.") {
+		return "burpsuite"
+	}
+	// Cobalt Strike Beacon
+	if strings.Contains(ua, "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)") {
+		return "cobaltstrike"
+	}
+	// SQLMap
+	if strings.Contains(ua, "sqlmap") {
+		return "sqlmap"
+	}
+	// 冰蝎
+	if strings.Contains(ua, "Apache-HttpClient") || strings.Contains(ua, "okhttp") || strings.Contains(ua, "Java") {
+		return "behinder"
+	}
+	// Nuclei
+	if strings.Contains(ua, "Nuclei") || strings.Contains(ua, "nuclei") {
+		return "nuclei"
+	}
+	// curl
+	if strings.Contains(ua, "curl") {
+		return "curl"
+	}
+	// Go HTTP client
+	if strings.Contains(ua, "Go-http-client") {
+		return "go-http"
+	}
+	// 浏览器类
+	if strings.Contains(ua, "Chrome") {
+		return "chrome"
+	}
+	if strings.Contains(ua, "Firefox") {
+		return "firefox"
+	}
+	if strings.Contains(ua, "Safari") && !strings.Contains(ua, "Chrome") {
+		return "safari"
+	}
+	if strings.Contains(ua, "Edge") {
+		return "edge"
+	}
+	return "unknown"
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -643,6 +859,44 @@ func (s *Server) handleClusterNodes(w http.ResponseWriter, r *http.Request) {
 		"nodes":           nodes,
 		"total":           len(nodes),
 		"cluster_enabled": true,
+	})
+}
+
+// handleClusterEvents 返回集群事件聚合列表
+// GET /api/cluster/events?limit=50&topic=connection
+func (s *Server) handleClusterEvents(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 50)
+	topic := r.URL.Query().Get("topic")
+
+	s.eventsMu.RLock()
+	defer s.eventsMu.RUnlock()
+
+	// 按 topic 过滤（可选）
+	var filtered []cluster.ClusterEvent
+	for _, evt := range s.clusterEvents {
+		if topic != "" && evt.Topic != topic {
+			continue
+		}
+		filtered = append(filtered, evt)
+	}
+
+	// 取最近 N 条
+	start := len(filtered) - limit
+	if start < 0 {
+		start = 0
+	}
+	result := filtered[start:]
+
+	if result == nil {
+		result = []cluster.ClusterEvent{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":           len(filtered),
+		"returned":        len(result),
+		"limit":           limit,
+		"cluster_enabled": s.clusterMgr != nil,
+		"events":          result,
 	})
 }
 

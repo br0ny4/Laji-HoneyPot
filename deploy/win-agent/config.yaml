@@ -1,11 +1,11 @@
 # Laji-HoneyPot Agent Configuration
 # Manager: 请填写 macOS 本机局域网 IP (ifconfig en0 | grep inet)
-# Agent: 10.111.29.4 (Windows 11)
+# Agent: AGENT_IP_PLACEHOLDER (Windows 11)
 
 log_level: info
 api_addr: "0.0.0.0:8080"
 data_dir: "./data"
-api_key: "hp-agent-2024"
+api_key: "YOUR_AGENT_API_KEY"
 
 plugins:
   honeypot-engine:
@@ -35,7 +35,7 @@ cluster:
   # 重要: 请将下面 IP 改为 macOS M1 本机的局域网 IP
   # 获取方法: 在 macOS 终端运行 → ipconfig getifaddr en0
   # ============================================================
-  manager_addr: "10.111.31.103:8443"
+  manager_addr: "MANAGER_IP_PLACEHOLDER:8443"
   tls_insecure: true
   cert_file: ""
   key_file: ""

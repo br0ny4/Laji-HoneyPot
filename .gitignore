@@ -1,11 +1,16 @@
 # Binaries
 /honeypot
 /honeypot-*
+!/honeypot-ctl
 /bin/
 *.exe
 *.dll
 *.so
 *.dylib
+
+# Runtime files
+.honeypot.pid
+honeypot.log
 
 # Test binary
 *.test

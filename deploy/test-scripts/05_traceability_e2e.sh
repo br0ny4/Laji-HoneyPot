@@ -1,13 +1,15 @@
 #!/bin/bash
 # ==========================================
 # T5 — 溯源反制全链路专项测试 v0.12.0
-# macOS Manager (10.111.31.103:8080) + Win11 Agent (10.111.29.4)
+# macOS Manager + Win11 Agent
 # 重点: 指纹采集/UA识别/面包屑/VulnDB/得分/审计/拓扑/截屏
 # ==========================================
 set -e
 
-MGR="http://localhost:8080"
-TIP="10.111.29.4"
+MANAGER_IP="${MANAGER_IP:-127.0.0.1}"
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
+MGR="http://${MANAGER_IP}:8080"
+TIP="$AGENT_IP"
 LOG="/tmp/t5_traceability.log"
 PASS=0; FAIL=0; SKIP=0
 

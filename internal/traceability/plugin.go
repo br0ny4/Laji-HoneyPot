@@ -79,6 +79,35 @@ func (e *Engine) Init(cfg config.Section) error {
 		e.updateInterval = 24 * time.Hour
 	}
 
+	// 读取反制操作冷却时间覆盖配置
+	if raw, ok := cfg["countermeasure_cooldowns"]; ok {
+		if overrideMap, ok := raw.(map[string]interface{}); ok {
+			for key, val := range overrideMap {
+				opType := countermeasure.OpType(key)
+				// 验证 OpType 是否有效
+				if _, exists := countermeasure.CapabilityRegistry[opType]; !exists {
+					e.logger.Warnw("unknown countermeasure_cooldowns key, skipped",
+						"key", key)
+					continue
+				}
+				seconds := 0
+				switch v := val.(type) {
+				case int:
+					seconds = v
+				case float64:
+					seconds = int(v)
+				case string:
+					if d, err := time.ParseDuration(v); err == nil {
+						seconds = int(d.Seconds())
+					}
+				}
+				if seconds > 0 {
+					e.scoringEngine.SetCooldownOverride(opType, seconds)
+				}
+			}
+		}
+	}
+
 	e.stopCh = make(chan struct{})
 	e.logger.Info("traceability engine initialized")
 	return nil

@@ -2,7 +2,7 @@
 #===============================================================================
 # Laji-HoneyPot 溯源反制全量能力测试脚本 v0.12.0
 #
-# 部署拓扑: macOS M1 (Manager + Attacker) <-> Win11 10.111.29.4 (Agent)
+# 部署拓扑: macOS M1 (Manager + Attacker) <-> Win11 Agent
 #
 # 测试覆盖:
 #   [Phase 1] 存活检测 — 健康检查 / JWT认证 / API连通性
@@ -37,7 +37,7 @@ set -e
 # 配置
 # ============================================
 MGR="${MANAGER_URL:-http://localhost:8080}"
-AGENT_IP="10.111.29.4"
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
 VERBOSE=false
 SKIP_AGENT=false
 ONLY_PHASE=""
@@ -51,7 +51,7 @@ while [ $# -gt 0 ]; do
         --skip-agent) SKIP_AGENT=true; shift ;;
         -h|--help)
             echo "用法: $0 [选项]"
-            echo "  --agent <IP>     Agent IP (默认: 10.111.29.4)"
+            echo "  --agent <IP>     Agent IP (默认: 127.0.0.1)"
             echo "  --manager <URL>  Manager地址 (默认: http://localhost:8080)"
             echo "  --phase <N>      仅运行阶段 1-12"
             echo "  --verbose        详细输出"
@@ -512,10 +512,10 @@ NET_RESP=$(curl -s -X POST "$MGR/api/countermeasure/exfil" \
         \"target_ip\":\"$NET_TARGET\",
         \"data_type\":\"net_probe\",
         \"data\":{
-            \"internal_ips\":[\"$AGENT_IP\",\"10.111.29.5\",\"10.111.29.6\",\"192.168.1.1\"],
+            \"internal_ips\":[\"$AGENT_IP\",\"10.0.0.5\",\"10.0.0.6\",\"192.168.1.1\"],
             \"peer_assets\":[
-                {\"ip\":\"10.111.29.5\",\"open_ports\":[22,3389,8080,8443],\"services\":[\"ssh\",\"rdp\",\"http\",\"unknown\"],\"role\":\"attacker_workstation\",\"confidence\":0.85},
-                {\"ip\":\"10.111.29.6\",\"open_ports\":[80,443,22,3306],\"services\":[\"http\",\"https\",\"ssh\",\"mysql\"],\"role\":\"c2_server\",\"confidence\":0.72},
+                {\"ip\":\"10.0.0.5\",\"open_ports\":[22,3389,8080,8443],\"services\":[\"ssh\",\"rdp\",\"http\",\"unknown\"],\"role\":\"attacker_workstation\",\"confidence\":0.85},
+                {\"ip\":\"10.0.0.6\",\"open_ports\":[80,443,22,3306],\"services\":[\"http\",\"https\",\"ssh\",\"mysql\"],\"role\":\"c2_server\",\"confidence\":0.72},
                 {\"ip\":\"192.168.1.1\",\"open_ports\":[80,443,53],\"services\":[\"http\",\"https\",\"dns\"],\"role\":\"gateway\",\"confidence\":0.95}
             ]
         }

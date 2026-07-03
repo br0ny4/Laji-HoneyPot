@@ -23,7 +23,7 @@ func TestAPIStats(t *testing.T) {
 	st.RecordConnection("10.0.0.2", 3306, "MySQL", "")
 
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/stats", nil)
 	w := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestAPIConnections(t *testing.T) {
 
 	st.RecordConnection("10.0.0.1", 8081, "HTTP", "Go-http-client")
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/connections?limit=10", nil)
 	w := httptest.NewRecorder()
@@ -70,7 +70,7 @@ func TestAPIConnections(t *testing.T) {
 }
 
 func TestAPIHealth(t *testing.T) {
-	srv := NewServer(log.New("info"), nil, nil, nil, "")
+	srv := NewServer(log.New("info"), nil, nil, nil, nil)
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -82,7 +82,7 @@ func TestAPIHealth(t *testing.T) {
 
 func TestAPIVulns(t *testing.T) {
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), nil, vdb, nil, "")
+	srv := NewServer(log.New("info"), nil, vdb, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/vulns", nil)
 	w := httptest.NewRecorder()
@@ -101,8 +101,145 @@ func TestAPIVulns(t *testing.T) {
 	}
 }
 
+func TestAPIVulnsFilterByTool(t *testing.T) {
+	vdb := vulndb.NewDB(log.New("info"))
+	srv := NewServer(log.New("info"), nil, vdb, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/vulns?tool=chrome", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Total int                `json:"total"`
+		Vulns []vulndb.VulnEntry `json:"vulns"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Total < 1 {
+		t.Errorf("expected at least 1 vuln for tool=chrome, got %d", resp.Total)
+	}
+	// 返回的条目都应该是 chrome 相关
+	for _, v := range resp.Vulns {
+		if v.Tool != "chrome" {
+			t.Errorf("expected all vulns to have tool=chrome, got %s", v.Tool)
+		}
+	}
+}
+
+func TestAPIVulnsFilterByCVE(t *testing.T) {
+	vdb := vulndb.NewDB(log.New("info"))
+	srv := NewServer(log.New("info"), nil, vdb, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/vulns?cve=CVE-2024-0519", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Total int                `json:"total"`
+		Vulns []vulndb.VulnEntry `json:"vulns"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Total != 1 {
+		t.Errorf("expected 1 vuln for CVE-2024-0519, got %d", resp.Total)
+	}
+	if resp.Vulns[0].CVE != "CVE-2024-0519" {
+		t.Errorf("expected CVE-2024-0519, got %s", resp.Vulns[0].CVE)
+	}
+}
+
+func TestAPIVulnsFilterByExploitType(t *testing.T) {
+	vdb := vulndb.NewDB(log.New("info"))
+	srv := NewServer(log.New("info"), nil, vdb, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/vulns?exploit_type=rce", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Total int                `json:"total"`
+		Vulns []vulndb.VulnEntry `json:"vulns"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Total < 1 {
+		t.Errorf("expected at least 1 vuln for exploit_type=rce, got %d", resp.Total)
+	}
+	// 返回的条目都应该是 rce 类型
+	for _, v := range resp.Vulns {
+		if string(v.ExploitType) != "rce" {
+			t.Errorf("expected all vulns to have exploit_type=rce, got %s", v.ExploitType)
+		}
+	}
+}
+
+func TestAPIVulnsActiveFilter(t *testing.T) {
+	vdb := vulndb.NewDB(log.New("info"))
+	srv := NewServer(log.New("info"), nil, vdb, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/vulns?active=true", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Total int                `json:"total"`
+		Vulns []vulndb.VulnEntry `json:"vulns"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	for _, v := range resp.Vulns {
+		if !v.IsActive {
+			t.Errorf("expected all vulns to be active, got inactive entry: %s", v.CVE)
+		}
+	}
+}
+
+func TestAPIServiceStatusNoEngine(t *testing.T) {
+	// 未注入蜜罐引擎时，应返回 503
+	srv := NewServer(log.New("info"), nil, nil, nil, nil)
+	req := httptest.NewRequest("GET", "/api/services/status", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestAPIDashboardAlias(t *testing.T) {
+	st, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer st.Close()
+
+	vdb := vulndb.NewDB(log.New("info"))
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
+
+	// /api/stats/dashboard 应返回与 /api/stats/detailed 相同的数据
+	req := httptest.NewRequest("GET", "/api/stats/dashboard", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200 for dashboard alias, got %d", w.Code)
+	}
+}
+
 func TestCORSHeaders(t *testing.T) {
-	srv := NewServer(log.New("info"), nil, nil, nil, "")
+	srv := NewServer(log.New("info"), nil, nil, nil, nil)
 	req := httptest.NewRequest("OPTIONS", "/api/stats", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -149,7 +286,7 @@ func TestQueryLimitClamp(t *testing.T) {
 		st.RecordConnection("10.0.0.1", 80, "HTTP", "")
 	}
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	// 请求超过上限的 limit
 	req := httptest.NewRequest("GET", "/api/connections?limit=9999", nil)
@@ -166,7 +303,7 @@ func TestAPIErrorMasking(t *testing.T) {
 	st, _ := store.New(":memory:")
 	defer st.Close()
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/stats", nil)
 	w := httptest.NewRecorder()
@@ -189,7 +326,7 @@ func TestCollectEndpointGET(t *testing.T) {
 	defer st.Close()
 
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/collect?d=%7B%22screen%22%3A%221920x1080%22%7D", nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 Test")
@@ -242,7 +379,7 @@ func TestCollectEndpointPOST(t *testing.T) {
 	defer st.Close()
 
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	body := strings.NewReader(`{"canvas":"abc123","gpu":"Intel","ip":"192.168.1.1"}`)
 	req := httptest.NewRequest("POST", "/api/collect", body)
@@ -264,7 +401,7 @@ func TestCollectEndpointEmptyData(t *testing.T) {
 	defer st.Close()
 
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/collect", nil)
 	w := httptest.NewRecorder()
@@ -292,7 +429,7 @@ func TestCollectEndpointTrackCookieReuse(t *testing.T) {
 	defer st.Close()
 
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
+	srv := NewServer(log.New("info"), st, vdb, nil, nil)
 
 	// 第一次请求设置 Cookie
 	req1 := httptest.NewRequest("GET", "/api/collect?d=first", nil)
@@ -330,123 +467,45 @@ func TestCollectEndpointTrackCookieReuse(t *testing.T) {
 	}
 }
 
-func TestAPIKeyAuthRequired(t *testing.T) {
+// JWT 认证测试：无 Token 时受保护端点返回 401
+func TestJWTAuthRequired(t *testing.T) {
 	st, _ := store.New(":memory:")
 	defer st.Close()
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "secret-key")
 
-	// 无 API Key → 401
+	authCfg := DefaultJWTConfig()
+	authMgr := NewAuthManager(authCfg, st)
+	srv := NewServer(log.New("info"), st, vdb, nil, authMgr)
+
+	// 无 JWT Token → 401
 	req := httptest.NewRequest("GET", "/api/stats", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
 	if w.Code != 401 {
-		t.Errorf("expected 401 without API key, got %d", w.Code)
+		t.Errorf("expected 401 without JWT token, got %d", w.Code)
 	}
 }
 
-func TestAPIKeyAuthSuccess(t *testing.T) {
+// JWT 豁免端点测试：healthz 和 collect 不受 JWT 保护
+func TestJWTAuthExemptEndpoints(t *testing.T) {
 	st, _ := store.New(":memory:")
 	defer st.Close()
-	st.RecordConnection("10.0.0.1", 8081, "HTTP", "")
-
 	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "secret-key")
 
-	// 正确 API Key → 200
-	req := httptest.NewRequest("GET", "/api/stats", nil)
-	req.Header.Set("X-API-Key", "secret-key")
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
+	authCfg := DefaultJWTConfig()
+	authMgr := NewAuthManager(authCfg, st)
+	srv := NewServer(log.New("info"), st, vdb, nil, authMgr)
 
-	if w.Code != 200 {
-		t.Errorf("expected 200 with valid API key, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAPIKeyAuthExemptEndpoints(t *testing.T) {
-	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), nil, vdb, nil, "secret-key")
-
-	// /healthz 无需 store 或 wsHub，应豁免认证
-	exemptPaths := []string{"/healthz"}
+	exemptPaths := []string{"/healthz", "/api/collect?d=test", "/api/auth/login"}
 	for _, path := range exemptPaths {
 		req := httptest.NewRequest("GET", path, nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, req)
 
 		if w.Code == 401 {
-			t.Errorf("%s should be exempt from auth, got 401", path)
+			t.Errorf("%s should be exempt from JWT auth, got 401", path)
 		}
-	}
-}
-
-func TestAPIKeyAuthExemptCollect(t *testing.T) {
-	st, _ := store.New(":memory:")
-	defer st.Close()
-	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "secret-key")
-
-	// /api/collect 需要 store，但同样豁免认证
-	req := httptest.NewRequest("GET", "/api/collect?d=test", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code == 401 {
-		t.Error("/api/collect should be exempt from auth, got 401")
-	}
-}
-
-func TestAPIKeyAuthDisabled(t *testing.T) {
-	st, _ := store.New(":memory:")
-	defer st.Close()
-	st.RecordConnection("10.0.0.1", 8081, "HTTP", "")
-
-	vdb := vulndb.NewDB(log.New("info"))
-	// api_key 为空 → 认证禁用
-	srv := NewServer(log.New("info"), st, vdb, nil, "")
-
-	req := httptest.NewRequest("GET", "/api/stats", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != 200 {
-		t.Errorf("expected 200 when auth disabled, got %d", w.Code)
-	}
-}
-
-func TestAPIKeyWrongKey(t *testing.T) {
-	st, _ := store.New(":memory:")
-	defer st.Close()
-	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "secret-key")
-
-	req := httptest.NewRequest("GET", "/api/stats", nil)
-	req.Header.Set("X-API-Key", "wrong-key")
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != 401 {
-		t.Errorf("expected 401 with wrong API key, got %d", w.Code)
-	}
-}
-
-func TestAPIKeyQueryParam(t *testing.T) {
-	st, _ := store.New(":memory:")
-	defer st.Close()
-	st.RecordConnection("10.0.0.1", 8081, "HTTP", "")
-
-	vdb := vulndb.NewDB(log.New("info"))
-	srv := NewServer(log.New("info"), st, vdb, nil, "secret-key")
-
-	// 通过查询参数传递 API Key
-	req := httptest.NewRequest("GET", "/api/stats?api_key=secret-key", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != 200 {
-		t.Errorf("expected 200 with api_key query param, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

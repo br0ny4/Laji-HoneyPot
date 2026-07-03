@@ -5,12 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -146,6 +149,21 @@ func NewAuthManager(cfg *JWTConfig, st *store.Store) *AuthManager {
 		limiter:          NewLoginRateLimiter(),
 		refreshBlacklist: make(map[string]time.Time),
 	}
+}
+
+// NewAuthManagerWithSecret 使用指定的 hex 编码密钥创建认证管理器
+// secret 为 hex 编码的 256 位密钥；若为空则回退到随机生成
+func NewAuthManagerWithSecret(cfg *JWTConfig, secret string, st *store.Store) *AuthManager {
+	if cfg == nil {
+		cfg = DefaultJWTConfig()
+	}
+	if secret != "" {
+		key, err := hex.DecodeString(secret)
+		if err == nil && len(key) == 32 {
+			cfg.Secret = key
+		}
+	}
+	return NewAuthManager(cfg, st)
 }
 
 // EnsureDefaultAdmin 确保存在默认管理员账号（首次启动自动创建）
@@ -310,14 +328,59 @@ func (a *AuthManager) Changepassword(username, oldPassword, newPassword string) 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
 		return fmt.Errorf("current password incorrect")
 	}
-	if len(newPassword) < 8 {
-		return fmt.Errorf("new password must be at least 8 characters")
+	if err := ValidatePassword(newPassword); err != nil {
+		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), a.config.BcryptCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
 	return a.store.UpdatePassword(username, string(hash))
+}
+
+// ValidatePassword 验证密码复杂度
+// 要求：最少 8 个字符，至少 1 个大写字母、1 个小写字母、1 个数字、1 个特殊字符
+func ValidatePassword(password string) error {
+	if len(password) < 8 {
+		return errors.New("密码需至少8个字符")
+	}
+
+	var (
+		hasUpper   bool
+		hasLower   bool
+		hasDigit   bool
+		hasSpecial bool
+	)
+
+	specialChars := "!@#$%^&*()_+-=[]{}|;':\",./<>?"
+
+	for _, ch := range password {
+		switch {
+		case unicode.IsUpper(ch):
+			hasUpper = true
+		case unicode.IsLower(ch):
+			hasLower = true
+		case unicode.IsDigit(ch):
+			hasDigit = true
+		case strings.ContainsRune(specialChars, ch):
+			hasSpecial = true
+		}
+	}
+
+	if !hasUpper {
+		return errors.New("密码需至少包含1个大写字母")
+	}
+	if !hasLower {
+		return errors.New("密码需至少包含1个小写字母")
+	}
+	if !hasDigit {
+		return errors.New("密码需至少包含1个数字")
+	}
+	if !hasSpecial {
+		return errors.New("密码需至少包含1个特殊字符（!@#$%^&*()_+-=[]{}|;':\",./<>?）")
+	}
+
+	return nil
 }
 
 // JWTClaimsFromRequest 从 HTTP 请求提取并验证 JWT Claims
@@ -401,9 +464,7 @@ func extractBearerToken(r *http.Request) string {
 
 // HandleLogin 登录接口
 // POST /api/auth/login
-func (a *AuthManager) HandleLogin(logger interface {
-	Infow(msg string, keysAndValues ...interface{})
-}, w http.ResponseWriter, r *http.Request) {
+func (a *AuthManager) HandleLogin(logger *log.Logger, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
 		return
@@ -426,22 +487,14 @@ func (a *AuthManager) HandleLogin(logger interface {
 	tokens, err := a.Login(req.Username, req.Password, clientIP)
 	if err != nil {
 		if logger != nil {
-			if log, ok := logger.(interface {
-				Warnw(msg string, keysAndValues ...interface{})
-			}); ok {
-				log.Warnw("login failed", "user", req.Username, "ip", clientIP, "error", err.Error())
-			}
+			logger.Warnw("login failed", "user", req.Username, "ip", clientIP, "error", err.Error())
 		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
 
 	if logger != nil {
-		if log, ok := logger.(interface {
-			Infow(msg string, keysAndValues ...interface{})
-		}); ok {
-			log.Infow("login success", "user", req.Username, "ip", clientIP)
-		}
+		logger.Infow("login success", "user", req.Username, "ip", clientIP)
 	}
 
 	writeJSON(w, http.StatusOK, tokens)

@@ -23,7 +23,7 @@
 - [ ] **Step 1: 初始化 Go module**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go mod init github.com/Laji-HoneyPot/honeypot
 ```
 
@@ -137,7 +137,7 @@ mkdir -p scripts
 - [ ] **Step 6: 安装初始依赖并验证编译**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go mod tidy
 go build ./cmd/honeypot/
 ```
@@ -216,7 +216,7 @@ func TestBaseImplementsPlugin(t *testing.T) {
 - [ ] **Step 3: 运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./internal/plugin/ -v
 ```
 
@@ -390,7 +390,7 @@ func TestSectionGet(t *testing.T) {
 - [ ] **Step 3: 添加依赖并运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go get gopkg.in/yaml.v3
 go test ./internal/core/config/ -v
 ```
@@ -519,7 +519,7 @@ func TestNewLoggerDefaultLevel(t *testing.T) {
 - [ ] **Step 3: 安装依赖并运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go get go.uber.org/zap
 go test ./internal/core/log/ -v
 ```
@@ -683,7 +683,7 @@ func TestTopics(t *testing.T) {
 - [ ] **Step 3: 运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./internal/core/bus/ -v
 ```
 
@@ -889,7 +889,7 @@ func TestRegisterAndLifecycle(t *testing.T) {
 - [ ] **Step 3: 运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./internal/core/registry/ -v
 ```
 
@@ -957,7 +957,7 @@ func main() {
 - [ ] **Step 2: 完整编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build -o honeypot ./cmd/honeypot/
 ./honeypot &
 sleep 1
@@ -1151,7 +1151,7 @@ func TestDuplicateListen(t *testing.T) {
 - [ ] **Step 3: 运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./internal/honeypot/tcpstack/ -v
 ```
 
@@ -1279,7 +1279,7 @@ func TestNginxConfig(t *testing.T) {
 - [ ] **Step 3: 运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./internal/honeypot/tls/ -v
 ```
 
@@ -1519,7 +1519,7 @@ func searchString(s, substr string) bool {
 - [ ] **Step 3: 运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./internal/honeypot/services/http/ -v
 ```
 
@@ -1763,7 +1763,7 @@ func (s *Server) String() string { return "MySQL-Honeypot/8.0.35" }
 由于 MySQL 蜜罐需要特定客户端连接测试，当前阶段只做编译验证：
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/honeypot/services/mysql/
 ```
 
@@ -1907,7 +1907,7 @@ func (s *Server) fakeKeys() string {
 - [ ] **Step 2: Redis 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/honeypot/services/redis/
 ```
 
@@ -2000,7 +2000,7 @@ func (s *Server) String() string { return fmt.Sprintf("SSH-Honeypot/OpenSSH-9.3"
 - [ ] **Step 2: SSH 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/honeypot/services/ssh/
 ```
 
@@ -2182,7 +2182,7 @@ func (e *Engine) Stop() error {
 - [ ] **Step 3: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/honeypot/
 ```
 
@@ -2338,7 +2338,7 @@ func DefaultSeccompProfile() string {
 - [ ] **Step 3: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go get github.com/docker/docker/client
 go build ./internal/honeypot/manager/
 ```
@@ -2622,7 +2622,7 @@ func TestSeedAndQuery(t *testing.T) {
 - [ ] **Step 4: 运行测试**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./internal/traceability/vulndb/ -v
 ```
 
@@ -2815,7 +2815,7 @@ func (fp *AttackerFingerprint) ToJSON() ([]byte, error) {
 - [ ] **Step 2: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/traceability/fingerprint/
 ```
 
@@ -3025,7 +3025,7 @@ func (g *Generator) GenerateCSProfileExtractor(targetIP string) string {
 - [ ] **Step 2: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/traceability/payload/
 ```
 
@@ -3131,7 +3131,7 @@ func (e *Engine) GetPayloadGen() *payload.Generator {
 - [ ] **Step 2: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/traceability/
 ```
 
@@ -3256,7 +3256,7 @@ func (s *Syncer) GetLatestRelease() (string, error) {
 - [ ] **Step 2: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/ops/github/
 ```
 
@@ -3466,7 +3466,7 @@ func (c *Comparator) GenerateReport() string {
 - [ ] **Step 2: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/ops/research/
 ```
 
@@ -3555,7 +3555,7 @@ func (e *Engine) GetSyncer() *github.Syncer {
 - [ ] **Step 2: 编译验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go build ./internal/ops/
 ```
 
@@ -3635,7 +3635,7 @@ func main() {
 - [ ] **Step 2: 全量编译**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go mod tidy
 go build -o honeypot ./cmd/honeypot/
 ```
@@ -3829,7 +3829,7 @@ services:
 - [ ] **Step 1: 使用 Vite 创建 React 项目**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 npm create vite@latest web -- --template react-ts
 cd web
 npm install
@@ -4005,7 +4005,7 @@ th { color: #64748b; font-weight: 600; }
 - [ ] **Step 4: 构建并验证**
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot/web
+cd $PROJECT_ROOT/web
 npm run build
 ```
 
@@ -4018,7 +4018,7 @@ Expected: 构建成功
 所有模块编译验证通过后，执行全量测试：
 
 ```bash
-cd /Users/kiana/Downloads/code/Laji-HoneyPot
+cd $PROJECT_ROOT
 go test ./... -v
 go build -o honeypot ./cmd/honeypot/
 ./honeypot &

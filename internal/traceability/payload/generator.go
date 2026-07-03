@@ -39,7 +39,10 @@ func NewGenerator(logger *log.Logger, callbackURL string) *Generator {
 }
 
 // GenerateBrowserFingerprint 生成浏览器指纹采集 JS Payload
-// 采集：Canvas、WebGL、屏幕分辨率、时区、语言、WebRTC 内网 IP、浏览器插件
+// 采集：Canvas、WebGL、屏幕分辨率、时区、语言、WebRTC 内网 IP、浏览器插件、
+//
+//	AudioContext、数学精度、硬件并发、设备内存、平台、网络类型、
+//	触屏支持、广告拦截器、Cookie 状态、DNT
 func (g *Generator) GenerateBrowserFingerprint() *PayloadResult {
 	js := fmt.Sprintf(`
 (function(){
@@ -68,6 +71,67 @@ func (g *Generator) GenerateBrowserFingerprint() *PayloadResult {
       d.webgl_renderer = gl.getParameter(gl.RENDERER);
     }
   } catch(e) {}
+
+  // AudioContext 指纹
+  try {
+    var ac = new (window.AudioContext || window.webkitAudioContext)();
+    var osc = ac.createOscillator();
+    var ana = ac.createAnalyser();
+    var gain = ac.createGain();
+    gain.gain.value = 0;
+    osc.connect(ana);
+    ana.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(0);
+    var freq = new Uint8Array(ana.frequencyBinCount);
+    ana.getByteFrequencyData(freq);
+    osc.stop(0);
+    ac.close();
+    var hash = 0;
+    for (var i = 0; i < freq.length; i++) { hash = ((hash << 5) - hash) + freq[i]; hash |= 0; }
+    d.audio = hash.toString();
+  } catch(e) {}
+
+  // 数学精度指纹
+  try { d.mathPrecision = String(Math.tan(-1e300)); } catch(e) {}
+
+  // 硬件并发（CPU 核心数）
+  try { d.hwConcurrency = navigator.hardwareConcurrency || 0; } catch(e) {}
+
+  // 设备内存
+  try { d.deviceMemory = navigator.deviceMemory || 0; } catch(e) {}
+
+  // 平台
+  try { d.platform = navigator.platform || ''; } catch(e) {}
+
+  // 网络连接类型
+  try {
+    d.connectionType = navigator.connection ? navigator.connection.effectiveType || 'unknown' : 'unknown';
+  } catch(e) {}
+
+  // 触屏支持
+  try {
+    d.touchSupport = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+  } catch(e) {}
+
+  // 最大触控点数
+  try { d.maxTouchPoints = navigator.maxTouchPoints || 0; } catch(e) {}
+
+  // 广告拦截器检测
+  try {
+    var ad = document.createElement('div');
+    ad.className = 'adsbox';
+    ad.style.cssText = 'position:absolute;left:-9999px;top:-9999px;height:1px;width:1px';
+    document.body.appendChild(ad);
+    d.adBlocker = ad.offsetHeight === 0 || ad.offsetParent === null;
+    document.body.removeChild(ad);
+  } catch(e) {}
+
+  // Cookie 启用状态
+  try { d.cookieEnabled = navigator.cookieEnabled; } catch(e) {}
+
+  // Do Not Track
+  try { d.doNotTrack = navigator.doNotTrack || ''; } catch(e) {}
 
   // 屏幕
   d.screen = screen.width + 'x' + screen.height;
@@ -106,7 +170,7 @@ func (g *Generator) GenerateBrowserFingerprint() *PayloadResult {
 	return &PayloadResult{
 		Type:        JSBrowser,
 		Content:     js,
-		Description: "浏览器指纹+内网 IP 采集：Canvas、WebGL、屏幕分辨率、时区、语言、插件列表、WebRTC 内网 IP",
+		Description: "全维度浏览器指纹采集：Canvas、WebGL、AudioContext、数学精度、硬件并发、设备内存、平台、网络类型、触屏、广告拦截器、Cookie、DNT、WebRTC 内网 IP",
 	}
 }
 

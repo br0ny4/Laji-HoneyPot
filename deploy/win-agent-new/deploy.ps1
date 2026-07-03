@@ -1,5 +1,6 @@
+$MANAGER_IP = if ($env:MANAGER_IP) { $env:MANAGER_IP } else { "127.0.0.1" }
 Write-Host "=== Laji-HoneyPot Agent v0.12.0 ===" -ForegroundColor Cyan
-Write-Host "Manager: 10.111.31.103:8443" -ForegroundColor Green
+Write-Host "Manager: ${MANAGER_IP}:8443" -ForegroundColor Green
 Write-Host ""
 
 $exe = "honeypot-agent.exe"

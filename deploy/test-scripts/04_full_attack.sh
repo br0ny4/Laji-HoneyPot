@@ -5,22 +5,24 @@
 # ==========================================
 set -e
 
-MGR_TRAP="http://10.111.31.103:8081"
-AGENT_TRAP="http://10.111.29.4:8081"
-MGR_API="http://10.111.31.103:8080"
+MANAGER_IP="${MANAGER_IP:-127.0.0.1}"
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
+MGR_TRAP="http://${MANAGER_IP}:8081"
+AGENT_TRAP="http://${AGENT_IP}:8081"
+MGR_API="http://${MANAGER_IP}:8080"
 KEY="hp-admin-2024"
 
 echo "===================================================================="
 echo "  Laji-HoneyPot — 全量模拟攻击测试"
-echo "  管理端: 10.111.31.103 (macOS)"
-echo "  Agent:  10.111.29.4 (Windows)"
+echo "  管理端: ${MANAGER_IP} (macOS)"
+echo "  Agent:  ${AGENT_IP} (Windows)"
 echo "===================================================================="
 echo ""
 
 # ----- 1. 端口扫描 (模拟 Nmap) -----
 echo ">>> 1. 端口扫描 (管理端 8081)"
 for port in 8081 3306 6379 2222 2121 3890 4450 33890; do
-  timeout 2 bash -c "echo >/dev/tcp/10.111.31.103/$port" 2>/dev/null && echo "  $port: OPEN" || echo "  $port: closed/filtered"
+  timeout 2 bash -c "echo >/dev/tcp/${MANAGER_IP}/$port" 2>/dev/null && echo "  $port: OPEN" || echo "  $port: closed/filtered"
 done
 
 # ----- 2. 多工具 UA 面包屑访问 -----
@@ -61,31 +63,31 @@ echo ">>> 4. 协议级攻击模拟"
 
 # MySQL
 echo "  MySQL (port 3306)..."
-echo -e '\x00\x00\x00\x01\x85\xa6\x3f\x20\x00\x00\x00\x01\x08\x00\x00\x00\x00\x00\x00\x00\x00' | timeout 2 nc 10.111.31.103 3306 > /tmp/mysql_banner.hex 2>&1 &
+echo -e '\x00\x00\x00\x01\x85\xa6\x3f\x20\x00\x00\x00\x01\x08\x00\x00\x00\x00\x00\x00\x00\x00' | timeout 2 nc ${MANAGER_IP} 3306 > /tmp/mysql_banner.hex 2>&1 &
 sleep 0.5; kill %1 2>/dev/null
 echo "  MySQL: done"
 
 # SSH banner
 echo "  SSH (port 2222)..."
-echo "SSH-2.0-test" | timeout 2 nc 10.111.31.103 2222 > /tmp/ssh_banner.txt 2>&1 &
+echo "SSH-2.0-test" | timeout 2 nc ${MANAGER_IP} 2222 > /tmp/ssh_banner.txt 2>&1 &
 sleep 0.5; kill %1 2>/dev/null
 head -1 /tmp/ssh_banner.txt 2>/dev/null && echo "  SSH: connected" || echo "  SSH: timeout OK"
 
 # FTP
 echo "  FTP (port 2121)..."
-timeout 2 bash -c "echo -e 'USER admin\r\nPASS test123\r\n' | nc 10.111.31.103 2121" > /tmp/ftp_banner.txt 2>&1 &
+timeout 2 bash -c "echo -e 'USER admin\r\nPASS test123\r\n' | nc ${MANAGER_IP} 2121" > /tmp/ftp_banner.txt 2>&1 &
 sleep 0.5; kill %1 2>/dev/null
 grep -q "220" /tmp/ftp_banner.txt 2>/dev/null && echo "  FTP: banner received" || echo "  FTP: timeout OK"
 
 # DNS (UDP)
 echo "  DNS (port 5354)..."
-echo "test" | timeout 2 nc -u 10.111.31.103 5354 > /tmp/dns_resp.hex 2>&1 &
+echo "test" | timeout 2 nc -u ${MANAGER_IP} 5354 > /tmp/dns_resp.hex 2>&1 &
 sleep 0.5; kill %1 2>/dev/null
 echo "  DNS: probe sent"
 
 # ----- 5. Defender Hits (Agent端攻击) -----
 echo ""
-echo ">>> 5. Agent 端攻击 (10.111.29.4:8081) — 若 Agent 已上线"
+echo ">>> 5. Agent 端攻击 (${AGENT_TRAP}) — 若 Agent 已上线"
 agent_code=$(curl -s -o /dev/null -w "%{http_code}" "$AGENT_TRAP/" 2>/dev/null)
 if [ "$agent_code" = "200" ]; then
   echo "  Agent ONLINE — 发起攻击"

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api';
+import Skeleton from './Skeleton';
 
 interface Stats {
   active_services: number;
@@ -102,7 +103,29 @@ export default function DashboardPanel() {
   }
 
   if (!stats) {
-    return <div className="loading">正在连接后端 API...</div>;
+    return (
+      <div className="dashboard-panel">
+        <div className="skeleton-stats-grid">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} variant="card" />
+          ))}
+        </div>
+        <div className="panel-row">
+          <div className="panel-half">
+            <h3 className="section-title">服务分布</h3>
+            <Skeleton variant="text" rows={4} />
+          </div>
+          <div className="panel-half">
+            <h3 className="section-title">攻击工具分布</h3>
+            <Skeleton variant="text" rows={4} />
+          </div>
+        </div>
+        <div>
+          <h3 className="section-title">最近连接</h3>
+          <Skeleton variant="table" rows={5} cols={5} />
+        </div>
+      </div>
+    );
   }
 
   return (

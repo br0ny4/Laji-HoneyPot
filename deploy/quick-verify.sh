@@ -8,7 +8,7 @@
 set -e
 
 MGR="${1:-http://localhost:8080}"
-AGENT="${2:-10.111.29.4}"
+AGENT="${2:-127.0.0.1}"
 TOKEN=""
 
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; NC='\033[0m'

@@ -1,11 +1,13 @@
 #!/bin/bash
 # ==========================================
 # 02 — Payload 投递 & 面包屑测试
-# 攻击目标: 管理端 HTTP 蜜罐 (10.111.31.103:8081)
+# 攻击目标: 管理端 HTTP 蜜罐
 # ==========================================
-MGR_TRAP="http://10.111.31.103:8081"
-AGENT_TRAP="http://10.111.29.4:8081"
-MGR_API="http://10.111.31.103:8080"
+MANAGER_IP="${MANAGER_IP:-127.0.0.1}"
+AGENT_IP="${AGENT_IP:-127.0.0.1}"
+MGR_TRAP="http://${MANAGER_IP}:8081"
+AGENT_TRAP="http://${AGENT_IP}:8081"
+MGR_API="http://${MANAGER_IP}:8080"
 KEY="hp-admin-2024"
 
 echo "=========================================="
@@ -37,7 +39,7 @@ BREADCRUMBS=(
   "/jenkins/script"
 )
 
-echo ">>> 测试管理端蜜罐 (10.111.31.103:8081)"
+echo ">>> 测试管理端蜜罐 (${MGR_TRAP})"
 echo ""
 
 for label in burp chrome firefox sqlmap nuclei curl python; do
@@ -70,7 +72,7 @@ echo "  Chrome: ${chrome_size} bytes"
 echo "  Diff:   ${diff} bytes (>=15KB = implant delivered)"
 
 echo ""
-echo ">>> Agent 蜜罐验证 (10.111.29.4:8081) — 需 Agent 已部署"
+echo ">>> Agent 蜜罐验证 (${AGENT_TRAP}) — 需 Agent 已部署"
 agent_resp=$(curl -s -o /dev/null -w "%{http_code}" "$AGENT_TRAP/" 2>/dev/null)
 if [ "$agent_resp" = "200" ]; then
   echo "  Agent HTTP: OK (200)"

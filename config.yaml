@@ -4,6 +4,8 @@ api_addr: "0.0.0.0:8080"
 data_dir: "./data"
 # api_key 管理后台认证密钥（留空则不启用认证）
 api_key: "hp-admin-2024"
+# JWT 签名密钥留空则自动生成
+jwt_secret: ""
 
 plugins:
   honeypot-engine:
@@ -81,6 +83,11 @@ plugins:
   traceability-engine:
     enabled: true
     update_interval: "24h"
+    # 反制操作冷却时间覆盖（秒），留空使用默认值
+    # countermeasure_cooldowns:
+    #   net_probe: 120
+    #   screen_capture: 5
+    #   file_scan: 60
   ops-engine:
     enabled: true
 
@@ -114,3 +121,11 @@ alerts:
   #   enabled: true
   #   url: "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK"
   #   event_filter: ["breadcrumb", "attack"]
+
+# Webhook 告警（独立配置，critical/high 级别事件自动推送）
+# 支持钉钉、飞书、通用 Webhook，可选 HMAC 签名认证
+webhook:
+  enabled: false
+  type: "feishu"    # feishu, dingtalk, or generic
+  url: ""
+  secret: ""        # optional HMAC secret

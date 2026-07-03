@@ -77,9 +77,9 @@ var knownPorts = map[int]string{
 
 // Scanner 资产扫描器
 type Scanner struct {
-	mu         sync.Mutex
-	results    []ServiceInfo
-	timeout    time.Duration
+	mu          sync.Mutex
+	results     []ServiceInfo
+	timeout     time.Duration
 	hostTargets []string
 }
 
@@ -90,7 +90,7 @@ func NewScanner(hostTargets []string) *Scanner {
 		hostTargets = []string{"127.0.0.1"}
 	}
 	return &Scanner{
-		timeout:    3 * time.Second,
+		timeout:     3 * time.Second,
 		hostTargets: hostTargets,
 	}
 }
@@ -152,7 +152,7 @@ func (s *Scanner) scanPort(target ScanTarget) ServiceInfo {
 		Scanned: time.Now(),
 	}
 
-	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
+	addr := net.JoinHostPort(target.Host, fmt.Sprintf("%d", target.Port))
 	conn, err := net.DialTimeout("tcp", addr, s.timeout)
 	if err != nil {
 		return info

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -132,14 +133,32 @@ func main() {
 
 	// JWT 认证管理器（默认密码 admin/admin123，生产环境请务必修改）
 	authCfg := api.DefaultJWTConfig()
-	authMgr := api.NewAuthManager(authCfg, st)
+	var authMgr *api.AuthManager
+	if cfg.JWTSecret != "" {
+		authMgr = api.NewAuthManagerWithSecret(authCfg, cfg.JWTSecret, st)
+		logger.Info("JWT signing key loaded from config")
+	} else {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			logger.Fatalw("failed to generate JWT secret", "error", err)
+		}
+		hexSecret := hex.EncodeToString(secret)
+		cfg.JWTSecret = hexSecret
+		if err := config.Save(cfg); err != nil {
+			logger.Warnw("failed to save JWT secret to config.yaml", "error", err)
+		} else {
+			logger.Info("JWT signing key generated and saved to config.yaml")
+		}
+		authMgr = api.NewAuthManagerWithSecret(authCfg, hexSecret, st)
+	}
 	if err := authMgr.EnsureDefaultAdmin(); err != nil {
 		logger.Fatalw("ensure default admin failed", "error", err)
 	}
 	logger.Infow("auth manager initialized", "default_user", "admin")
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, authMgr)
-	apiSrv.SetTraceEngine(trEngine) // 注入溯源反制引擎（深度反制 API）
+	apiSrv.SetTraceEngine(trEngine)    // 注入溯源反制引擎（深度反制 API）
+	apiSrv.SetHoneypotEngine(hpEngine) // 注入蜜罐引擎（服务状态查询 API）
 
 	// 注入陷阱配置到 API 服务器（供前端 /api/traps/config 查询）
 	if trapData := buildTrapConfigJSON(hpEngine.GetTrapRegistry()); trapData != nil {
@@ -218,7 +237,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Info("shutting down...")
+	logger.Info("Shutting down gracefully...")
 
 	// 优雅关闭 API 服务器（最多等 5 秒）
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -227,7 +246,12 @@ func main() {
 		logger.Errorw("API shutdown error", "error", err)
 	}
 
+	// 先释放蜜罐端口，再停止其他插件
+	if err := hpEngine.Close(); err != nil {
+		logger.Errorw("honeypot port release error", "error", err)
+	}
 	reg.StopAll()
+	logger.Info("All ports released")
 	logger.Info("Laji-HoneyPot stopped")
 }
 

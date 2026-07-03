@@ -1,4 +1,5 @@
 // API 请求工具 — JWT 认证 + 自动令牌刷新
+import { showToast } from './Toast';
 let accessToken = '';
 let refreshToken = '';
 
@@ -141,6 +142,12 @@ export async function apiFetch(url: string, init?: RequestInit): Promise<Respons
         emitLog(retryRes.ok ? 'info' : 'warn', `(retry) ${init?.method || 'GET'} ${url} → ${retryRes.status} (${retryElapsed}ms)`);
         return retryRes;
       }
+      // 刷新失败，会话过期
+      showToast('会话已过期，请重新登录', 3000);
+      setTimeout(() => {
+        clearTokens();
+        window.location.reload();
+      }, 1500);
     }
 
     emitLog(res.ok ? 'info' : 'warn', `${init?.method || 'GET'} ${url} → ${res.status} (${elapsed}ms)`);
