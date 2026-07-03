@@ -23,6 +23,7 @@
 - [核心特性](#核心特性)
 - [管理后台](#管理后台)
 - [陷阱模块选配](#陷阱模块选配)
+- [蜜饵投放系统](#蜜饵投放系统-v0160)
 - [Agent 部署](#agent-部署)
 - [测试验证](#测试验证)
 - [漏洞库](#漏洞库)
@@ -245,6 +246,9 @@ git push origin master
 | `POST /api/mfa/verify` | 验证 MFA 码并签发 5 分钟操作令牌 |
 | `GET /api/audit/chain?limit=` | 不可篡改审计链列表（SHA256 链式哈希） |
 | `GET /api/audit/chain/verify` | 审计链完整性独立校验 |
+| **攻击者画像 (v0.16.0)** | |
+| `GET /api/profile/attackers?limit=` | 攻击者画像列表（按风险评分排序） |
+| `GET /api/profile/attacker?ip=` | 单攻击者详细画像（含指纹/攻击/反制/蜜饵数据） |
 
 ### 模块化插件架构
 - **微内核**：注册中心 + 事件总线 + 配置中心 + 结构化日志（zap）
@@ -348,6 +352,40 @@ curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/traps/config
 ```
 
 **设计原则**：未选配的陷阱不会监听端口，不产生无效资源占用。HTTP 蜜罐未启用时，面包屑路径和反制载荷均不会生效。
+
+---
+
+## 蜜饵投放系统 (v0.16.0)
+
+当攻击者突破外围防线进入 HTTP 蜜罐后，系统自动投递伪造的敏感凭证文件作为"蜜饵"，诱使攻击者下载并使用，从而暴露其真实意图和活动轨迹。
+
+### 饵料类型
+
+| 类型 | 文件名 | 诱饵内容 |
+|------|--------|---------|
+| `aws_key` | `credentials.csv` | 伪造 AWS IAM Access Key / Secret Key |
+| `db_creds` | `database.yml` | 伪造 MySQL/PostgreSQL 连接串 + 密码 |
+| `api_token` | `.env.production` | 伪造 GitHub Token / JWT Secret / Stripe Key |
+| `ssh_key` | `id_rsa_prod` | 伪造 SSH 私钥 (PEM 格式) |
+| `git_config` | `.gitconfig` | 伪造 Git 用户配置 + 签名密钥 |
+| `wp_config` | `wp-config.php.bak` | 伪造 WordPress 配置文件 (DB 密码/密钥盐) |
+| `env_file` | `.env` | 伪造环境变量文件 (多服务凭据合集) |
+
+**追踪机制**：每个饵料文件内嵌唯一 `x-tracking-id` 种子，通过 HTTP 响应头 `X-Content-ID` 记录使用者 IP/UA/时间戳，形成完整访问追踪链。
+
+### 投放策略
+
+- HTTP 蜜罐页面自动注入隐藏的 `<a>` 标签指向 `/bait/` 路径
+- `robots.txt` 中声明 `Disallow: /bait/` 增加诱惑力
+- 管理后台 API 支持查看所有饵料令牌和访问记录
+
+### API 端点
+
+| 端点 | 功能 |
+|------|------|
+| `GET /api/bait/tokens` | 已生成的蜜饵令牌列表 |
+| `GET /api/bait/access?ip=&type=&limit=` | 蜜饵访问记录（按IP/类型过滤） |
+| `GET /api/bait/stats` | 蜜饵投放统计（总令牌数/被访问数/IP数） |
 
 ---
 
@@ -523,7 +561,9 @@ Laji-HoneyPot/
 │   ├── traceability/          # 溯源反制引擎
 │   │   ├── vulndb/            # 漏洞数据库 & NVD 爬虫
 │   │   ├── fingerprint/       # 攻击者指纹采集
-│   │   └── payload/           # Payload 生成与投递
+│   │   ├── payload/           # Payload 生成与投递
+│   │   └── countermeasure/    # 反制得分引擎 & 合规审计
+│   ├── bait/                  # 蜜饵投放系统 (虚假凭证/API密钥/敏感文件)
 │   ├── asset/                 # 资产探测模块 (端口扫描/服务识别/Banner抓取)
 │   ├── cluster/               # 分布式集群 (管理端/节点代理/TLS通信/Agent生成器)
 │   ├── alerter/               # 多通道告警 (Webhook/钉钉/飞书)
@@ -684,6 +724,8 @@ cd web && npm run lint            # ESLint 检查
 
 ## 开发路线图
 
+- [x] 蜜饵投放系统 — 7 类虚假凭证诱饵 + 访问追踪 + HTTP 蜜罐自动注入（v0.16.0）
+- [x] 攻击者画像 MVP — 多维度聚合 + 风险评分(0-100) + 行为标签引擎（v0.16.0）
 - [x] 微内核架构 + 事件总线 + 配置中心
 - [x] HTTP / MySQL / Redis / SSH 四大蜜罐服务
 - [x] 被动 TLS ClientHello 检测

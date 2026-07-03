@@ -172,6 +172,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/metrics", s.handleMetrics)
 	// 漏洞数据库
 	s.mux.HandleFunc("/api/vulns", s.handleVulns)
+	s.mux.HandleFunc("/api/vulndb", s.handleVulns)
 	// 蜜罐服务运行状态
 	s.mux.HandleFunc("/api/services/status", s.handleServiceStatus)
 	// 健康检查
@@ -765,6 +766,14 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush 实现 http.Flusher 接口，代理到底层 ResponseWriter
+// 用于 SSE (Server-Sent Events) 等需要流式传输的场景
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // rateLimiter 基于 IP 的简易令牌桶速率限制，默认 100 req/s

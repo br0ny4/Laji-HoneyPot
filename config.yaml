@@ -1,131 +1,81 @@
 log_level: info
-# api_addr 绑定 0.0.0.0 允许跨机访问管理后台
-api_addr: "0.0.0.0:8080"
-data_dir: "./data"
-# api_key 管理后台认证密钥（留空则不启用认证）
-api_key: "hp-admin-2024"
-# JWT 签名密钥留空则自动生成
-jwt_secret: ""
-
 plugins:
-  honeypot-engine:
-    enabled: true
-    # 陷阱场景选配 — 根据部署场景选择启用的蜜罐服务，无需默认启用全部陷阱
-    # web:           Web 业务场景（仅 HTTP 蜜罐 + 浏览器反制载荷）
-    # database:      数据库场景（MySQL + Redis 蜜罐）
-    # remote_access: 主机远程访问场景（SSH + RDP + FTP 蜜罐）
-    # infrastructure: 基础设施场景（DNS + LDAP + SMB 蜜罐）
-    # full:          全量启用（默认，向后兼容）
-    # custom:        自定义选配（配合 custom_services 手动选择）
-    trap_scenario: "full"
-    # 自定义选配服务列表（仅 trap_scenario=custom 时生效）
-    # custom_services:
-    #   - http
-    #   - mysql
-    #   - ssh
-    http_port: 8081
-    mysql_port: 3306
-    redis_port: 6379
-    ssh_port: 2222
-    ftp_port: 2121
-    ldap_port: 3890
-    dns_port: 5354
-    smb_port: 4450
-    rdp_port: 33890
-    # 自定义 HTTP 响应模板（可选，无需修改代码即可添加蜜罐页面）
-    custom_templates:
-      # 模拟 Jenkins 控制台
-      - path: "/jenkins/"
-        status: 200
-        content_type: "text/html"
-        body: |
-          <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Dashboard [Jenkins]</title>
-          <style>body{font-family:sans-serif;background:#f3f3f3;margin:0}
-          .header{background:#111;color:#fff;padding:8px 20px;font-size:14px}
-          .header a{color:#f0ad4e;text-decoration:none}
-          .content{padding:20px}
-          table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
-          th{background:#f5f5f5;padding:8px 12px;text-align:left;font-size:13px;border-bottom:2px solid #ddd}
-          td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}
-          .success{color:green}.failed{color:red}</style></head>
-          <body><div class="header">Jenkins <a href="/jenkins/script">Script Console</a></div>
-          <div class="content"><h2>Build History</h2><table><tr><th>#</th><th>Project</th><th>Status</th><th>Duration</th></tr>
-          <tr><td>342</td><td>backend-deploy</td><td class="success">SUCCESS</td><td>2m 34s</td></tr>
-          <tr><td>341</td><td>frontend-build</td><td class="success">SUCCESS</td><td>1m 12s</td></tr>
-          <tr><td>340</td><td>integration-test</td><td class="failed">FAILED</td><td>4m 51s</td></tr></table>
-          </div></body></html>
-          <!-- /jenkins/script -->
-        is_breadcrumb: false
-
-      # 模拟 Grafana 登录
-      - path: "/grafana/login"
-        status: 200
-        content_type: "text/html"
-        body: |
-          <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Grafana</title>
-          <style>body{font-family:'Open Sans',sans-serif;background:#1e1e2d;margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh}
-          .login{background:#222;padding:40px;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.3);width:320px}
-          h2{color:#d8d9da;text-align:center;margin-bottom:24px;font-weight:400}
-          .field{margin-bottom:16px}
-          .field label{display:block;color:#8e8e8e;font-size:12px;margin-bottom:4px;text-transform:uppercase}
-          .field input{width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:2px;color:#d8d9da;font-size:14px}
-          .field input:focus{border-color:#f2cc0c;outline:none}
-          .btn{width:100%;padding:10px;background:#f2cc0c;color:#000;border:none;border-radius:2px;font-size:14px;font-weight:600;cursor:pointer}
-          .btn:hover{background:#e5b800}
-          .footer{text-align:center;margin-top:20px;color:#555;font-size:11px}</style></head>
-          <body><div class="login"><h2>Welcome to Grafana</h2>
-          <form method="POST" action="/grafana/login"><div class="field"><label>Email or username</label><input type="text" name="user" /></div>
-          <div class="field"><label>Password</label><input type="password" name="password" /></div>
-          <button type="submit" class="btn">Log in</button></form>
-          <div class="footer">Grafana v9.5.2</div></div></body></html>
-          <!-- /admin/config.php -->
-        is_breadcrumb: false
-  traceability-engine:
-    enabled: true
-    update_interval: "24h"
-    # 反制操作冷却时间覆盖（秒），留空使用默认值
-    # countermeasure_cooldowns:
-    #   net_probe: 120
-    #   screen_capture: 5
-    #   file_scan: 60
-  ops-engine:
-    enabled: true
-
-# 集群配置（可选，默认关闭）
-# 管理节点开启后，远程蜜罐节点可通过 TLS 连接上报数据
+    honeypot-engine:
+        custom_templates:
+            - body: |
+                <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Dashboard [Jenkins]</title>
+                <style>body{font-family:sans-serif;background:#f3f3f3;margin:0}
+                .header{background:#111;color:#fff;padding:8px 20px;font-size:14px}
+                .header a{color:#f0ad4e;text-decoration:none}
+                .content{padding:20px}
+                table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+                th{background:#f5f5f5;padding:8px 12px;text-align:left;font-size:13px;border-bottom:2px solid #ddd}
+                td{padding:8px 12px;font-size:13px;border-bottom:1px solid #eee}
+                .success{color:green}.failed{color:red}</style></head>
+                <body><div class="header">Jenkins <a href="/jenkins/script">Script Console</a></div>
+                <div class="content"><h2>Build History</h2><table><tr><th>#</th><th>Project</th><th>Status</th><th>Duration</th></tr>
+                <tr><td>342</td><td>backend-deploy</td><td class="success">SUCCESS</td><td>2m 34s</td></tr>
+                <tr><td>341</td><td>frontend-build</td><td class="success">SUCCESS</td><td>1m 12s</td></tr>
+                <tr><td>340</td><td>integration-test</td><td class="failed">FAILED</td><td>4m 51s</td></tr></table>
+                </div></body></html>
+                <!-- /jenkins/script -->
+              content_type: text/html
+              is_breadcrumb: false
+              path: /jenkins/
+              status: 200
+            - body: |
+                <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Grafana</title>
+                <style>body{font-family:'Open Sans',sans-serif;background:#1e1e2d;margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh}
+                .login{background:#222;padding:40px;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,0.3);width:320px}
+                h2{color:#d8d9da;text-align:center;margin-bottom:24px;font-weight:400}
+                .field{margin-bottom:16px}
+                .field label{display:block;color:#8e8e8e;font-size:12px;margin-bottom:4px;text-transform:uppercase}
+                .field input{width:100%;padding:8px 12px;background:#111;border:1px solid #333;border-radius:2px;color:#d8d9da;font-size:14px}
+                .field input:focus{border-color:#f2cc0c;outline:none}
+                .btn{width:100%;padding:10px;background:#f2cc0c;color:#000;border:none;border-radius:2px;font-size:14px;font-weight:600;cursor:pointer}
+                .btn:hover{background:#e5b800}
+                .footer{text-align:center;margin-top:20px;color:#555;font-size:11px}</style></head>
+                <body><div class="login"><h2>Welcome to Grafana</h2>
+                <form method="POST" action="/grafana/login"><div class="field"><label>Email or username</label><input type="text" name="user" /></div>
+                <div class="field"><label>Password</label><input type="password" name="password" /></div>
+                <button type="submit" class="btn">Log in</button></form>
+                <div class="footer">Grafana v9.5.2</div></div></body></html>
+                <!-- /admin/config.php -->
+              content_type: text/html
+              is_breadcrumb: false
+              path: /grafana/login
+              status: 200
+        dns_port: 5354
+        enabled: true
+        ftp_port: 2121
+        http_port: 8081
+        ldap_port: 3890
+        mysql_port: 3306
+        rdp_port: 33890
+        redis_port: 6379
+        smb_port: 4450
+        ssh_port: 2222
+        trap_scenario: full
+    ops-engine:
+        enabled: true
+    traceability-engine:
+        enabled: true
+        update_interval: 24h
+api_addr: 0.0.0.0:8080
+data_dir: ./data
+api_key: hp-admin-2024
+jwt_secret: d00071d805b52e7ce66176c43be999da17d50560bcd9f42f25c33d3730f721d2
 cluster:
-  enabled: true         # 启用集群模式，接收远程 Agent 注册
-  role: "manager"       # 本节点角色: manager(管理端) | node(蜜罐节点)
-  listen_addr: "0.0.0.0:8443"   # 管理端监听地址 (role=manager 时生效)
-  manager_addr: ""      # 管理端地址 (role=node 时生效，如 "10.0.0.1:8443")
-  cert_file: ""         # TLS 证书路径 (留空则自动生成自签名证书，仅测试用)
-  key_file: ""          # TLS 私钥路径
-  ca_file: ""           # CA 证书路径 (留空则不验证客户端证书)
-
-# 告警通道配置（可选，不配置则不启用告警）
-alerts:
-  # 通用 Webhook（JSON POST 到指定 URL）
-  # - type: webhook
-  #   enabled: true
-  #   url: "https://your-server.com/honeypot/alerts"
-  #   event_filter: ["breadcrumb", "attack"]  # 可选，空=全部事件
-  #
-  # 钉钉机器人
-  # - type: dingtalk
-  #   enabled: true
-  #   url: "https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN"
-  #   event_filter: ["breadcrumb"]
-  #
-  # 飞书机器人
-  # - type: feishu
-  #   enabled: true
-  #   url: "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK"
-  #   event_filter: ["breadcrumb", "attack"]
-
-# Webhook 告警（独立配置，critical/high 级别事件自动推送）
-# 支持钉钉、飞书、通用 Webhook，可选 HMAC 签名认证
+    enabled: true
+    role: manager
+    listen_addr: 0.0.0.0:8443
+    manager_addr: ""
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    tls_insecure: false
 webhook:
-  enabled: false
-  type: "feishu"    # feishu, dingtalk, or generic
-  url: ""
-  secret: ""        # optional HMAC secret
+    enabled: false
+    type: feishu
+    url: ""
+    secret: ""
