@@ -25,7 +25,6 @@
 3. 生成规范 commit message → 包含: 版本号、功能点、变更统计
 4. 执行 git add -A → git commit -m "..." → git push origin master
 5. 验证远程同步 → git ls-remote origin HEAD 对比本地
-6. 更新 COMMIT_HISTORY.md → 增量追加新提交记录
 ```
 
 ### 禁止行为
@@ -47,7 +46,7 @@
 ### 记忆缺失恢复
 如果发现规则丢失（如上下文刷新导致遗忘）：
 1. 从 `.trae/rules.md` 文件重新加载所有规则
-2. 文件不存在时 → 从 `COMMIT_HISTORY.md` 反推出项目规范
+2. 文件不存在时 → 执行 `git log --oneline -5` 查看最近提交，确认当前状态后重新加载规则
 3. 最坏情况 → 从 GitHub 仓库拉取 `.trae/rules.md`
 
 ---
@@ -76,4 +75,3 @@
 - `README.md` - 功能说明、版本徽章、特征数据
 - `ISSUES.md` - 标记已修复 TODO，新增已验证项
 - `ITERATION_v*.md` - 迭代复盘报告
-- `COMMIT_HISTORY.md` - 增量追加提交记录
