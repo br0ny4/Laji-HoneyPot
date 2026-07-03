@@ -20,12 +20,14 @@ import (
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/alerter"
+	"github.com/Laji-HoneyPot/honeypot/internal/bait"
 	"github.com/Laji-HoneyPot/honeypot/internal/cluster"
 	"github.com/Laji-HoneyPot/honeypot/internal/core"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/api"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
+	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/registry"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 	honeypotEngine "github.com/Laji-HoneyPot/honeypot/internal/honeypot"
@@ -75,6 +77,18 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Infow("plugins started", "count", len(reg.List()), "plugins", reg.List())
+
+	// 蜜标/HoneyToken 诱饵系统：生成虚假凭证文件，注入到 HTTP 蜜罐响应中
+	// 攻击者下载蜜标文件时，自动追踪记录访问事件
+	baitGen := bait.NewGenerator()
+	baitTokens := baitGen.GenerateAll()
+	logger.Infow("bait tokens generated", "count", len(baitTokens))
+
+	baitTracker := bait.NewTracker(10000)
+	logger.Info("bait tracker initialized")
+
+	// 注入蜜标系统到 HTTP 蜜罐（所有 HTTP 响应自动包含蜜标链接）
+	hpEngine.SetBaitSystem(baitGen, baitTracker)
 
 	// 面包屑触发 → 反制 Payload 注入链路：溯源引擎根据攻击上下文智能选择最优载荷
 	hpEngine.SetCountermeasureProvider(func(path, userAgent, remoteIP string) string {
@@ -157,8 +171,13 @@ func main() {
 	logger.Infow("auth manager initialized", "default_user", "admin")
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, authMgr)
-	apiSrv.SetTraceEngine(trEngine)    // 注入溯源反制引擎（深度反制 API）
-	apiSrv.SetHoneypotEngine(hpEngine) // 注入蜜罐引擎（服务状态查询 API）
+	apiSrv.SetTraceEngine(trEngine)            // 注入溯源反制引擎（深度反制 API）
+	apiSrv.SetHoneypotEngine(hpEngine)         // 注入蜜罐引擎（服务状态查询 API）
+	apiSrv.SetBaitSystem(baitGen, baitTracker) // 注入蜜标系统（诱饵管理 API）
+
+	// 注入攻击者画像构建器
+	profileBuilder := profile.NewBuilder(st)
+	apiSrv.SetProfileBuilder(profileBuilder)
 
 	// 注入陷阱配置到 API 服务器（供前端 /api/traps/config 查询）
 	if trapData := buildTrapConfigJSON(hpEngine.GetTrapRegistry()); trapData != nil {

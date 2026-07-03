@@ -9,8 +9,8 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
-  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-28%2F28%20PASS-brightgreen" alt="Tests" /></a>
-  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.15.0-blue" alt="Version" /></a>
+  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-30%2F30%20PASS-brightgreen" alt="Tests" /></a>
+  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.16.0-blue" alt="Version" /></a>
 </p>
 
 ---

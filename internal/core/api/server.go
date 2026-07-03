@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/asset"
+	"github.com/Laji-HoneyPot/honeypot/internal/bait"
 	"github.com/Laji-HoneyPot/honeypot/internal/cluster"
 	"github.com/Laji-HoneyPot/honeypot/internal/core"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
@@ -40,11 +41,14 @@ type Server struct {
 	auditChain      *AuditChain  // 不可篡改审计链
 	authManager     *AuthManager // JWT 认证管理器
 	profileEngine   *profile.Engine
+	profileBuilder  *profile.Builder     // 攻击者画像构建器
 	clusterMgr      *cluster.Manager     // 集群管理端 (可选)
 	clusterGen      *cluster.Generator   // Agent 生成引擎 (可选)
 	trapConfigData  []byte               // 陷阱配置 JSON 缓存（启动时写入，只读）
 	traceEngine     *traceability.Engine // 溯源反制引擎（深度反制API）
 	hpEngine        *honeypot.Engine     // 蜜罐引擎（服务状态查询）
+	baitGen         *bait.Generator      // 蜜标生成器
+	baitTracker     *bait.Tracker        // 蜜标访问追踪器
 	mux             *http.ServeMux
 	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
 	startTime       time.Time
@@ -131,6 +135,17 @@ func (s *Server) SetHoneypotEngine(engine *honeypot.Engine) {
 	s.hpEngine = engine
 }
 
+// SetBaitSystem 注入蜜标生成器和追踪器（由 main 注入）
+func (s *Server) SetBaitSystem(gen *bait.Generator, tracker *bait.Tracker) {
+	s.baitGen = gen
+	s.baitTracker = tracker
+}
+
+// SetProfileBuilder 设置攻击者画像构建器（由 main 注入）
+func (s *Server) SetProfileBuilder(pb *profile.Builder) {
+	s.profileBuilder = pb
+}
+
 func (s *Server) registerRoutes() {
 	// 仪表盘
 	s.mux.HandleFunc("/api/stats", s.handleStats)
@@ -177,6 +192,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/profiles", s.handleProfiles)
 	s.mux.HandleFunc("/api/profiles/stats", s.handleProfileStats)
 	s.mux.HandleFunc("/api/profiles/tags", s.handleProfileTags)
+	// 攻击者画像 v2 — Builder 聚合接口
+	s.mux.HandleFunc("/api/profile/attackers", s.handleProfileAttackers)
+	s.mux.HandleFunc("/api/profile/attacker", s.handleProfileAttacker)
 	// 资产探测
 	s.mux.HandleFunc("/api/assets/scan", s.handleAssetScan)
 	// 集群节点
@@ -224,6 +242,11 @@ func (s *Server) registerRoutes() {
 	// 安全合规 — 不可篡改审计链
 	s.mux.HandleFunc("/api/audit/chain", s.handleAuditChain)
 	s.mux.HandleFunc("/api/audit/chain/verify", s.handleAuditChainVerify)
+
+	// 蜜标/HoneyToken 诱饵系统 API
+	s.mux.HandleFunc("/api/bait/tokens", s.handleBaitTokens)
+	s.mux.HandleFunc("/api/bait/access", s.handleBaitAccess)
+	s.mux.HandleFunc("/api/bait/stats", s.handleBaitStats)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -977,6 +1000,47 @@ func (s *Server) handleProfileTags(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleProfileAttackers 返回攻击者画像列表（Builder 聚合）
+// GET /api/profile/attackers?limit=50
+func (s *Server) handleProfileAttackers(w http.ResponseWriter, r *http.Request) {
+	if s.profileBuilder == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "profiling service not available"})
+		return
+	}
+	limit := queryInt(r, "limit", 50)
+	profiles, err := s.profileBuilder.BuildAllProfiles(limit)
+	if err != nil {
+		s.logger.Errorw("profile attackers query failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":    len(profiles),
+		"profiles": profiles,
+	})
+}
+
+// handleProfileAttacker 返回单个攻击者画像详情（Builder 聚合）
+// GET /api/profile/attacker?ip=1.2.3.4
+func (s *Server) handleProfileAttacker(w http.ResponseWriter, r *http.Request) {
+	if s.profileBuilder == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "profiling service not available"})
+		return
+	}
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ip parameter required"})
+		return
+	}
+	profile, err := s.profileBuilder.BuildProfile(ip)
+	if err != nil {
+		s.logger.Errorw("profile attacker query failed", "ip", ip, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, profile)
+}
+
 // handleTrapConfig 返回当前陷阱场景配置（GET /api/traps/config）
 func (s *Server) handleTrapConfig(w http.ResponseWriter, r *http.Request) {
 	if s.trapConfigData == nil {
@@ -1554,6 +1618,84 @@ func (s *Server) handleFileScansList(w http.ResponseWriter, r *http.Request) {
 		"offset":  offset,
 		"records": records,
 	})
+}
+
+// ============================================================
+// 蜜标/HoneyToken API — 诱饵文件管理 & 访问追踪
+// ============================================================
+
+// handleBaitTokens 返回所有已生成的蜜标（不含追踪种子数据）
+// GET /api/bait/tokens
+func (s *Server) handleBaitTokens(w http.ResponseWriter, r *http.Request) {
+	if s.baitGen == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "bait system not initialized"})
+		return
+	}
+	tokens := s.baitGen.AllTokens()
+	// Strip seed data from response to avoid leaking tracking IDs
+	type tokenInfo struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		FileName string `json:"file_name"`
+		URL      string `json:"url"`
+	}
+	result := make([]tokenInfo, 0, len(tokens))
+	for _, t := range tokens {
+		result = append(result, tokenInfo{
+			ID:       t.ID,
+			Type:     t.Type,
+			FileName: t.FileName,
+			URL:      t.GetURL(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":  len(result),
+		"tokens": result,
+	})
+}
+
+// handleBaitAccess 返回蜜标访问记录，支持 ?ip= 和 ?type= 过滤
+// GET /api/bait/access?ip=&type=
+func (s *Server) handleBaitAccess(w http.ResponseWriter, r *http.Request) {
+	if s.baitTracker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "bait tracker not initialized"})
+		return
+	}
+
+	ip := r.URL.Query().Get("ip")
+	baitType := r.URL.Query().Get("type")
+	limit := queryInt(r, "limit", 100)
+
+	var records []bait.AccessRecord
+	if ip != "" {
+		records = s.baitTracker.GetByIP(ip)
+	} else if baitType != "" {
+		records = s.baitTracker.GetByType(baitType)
+	} else {
+		records = s.baitTracker.All(limit)
+	}
+
+	// Apply limit if filtering by ip or type
+	if (ip != "" || baitType != "") && limit > 0 && limit < len(records) {
+		records = records[:limit]
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":   len(records),
+		"limit":   limit,
+		"records": records,
+	})
+}
+
+// handleBaitStats 返回蜜标统计信息
+// GET /api/bait/stats
+func (s *Server) handleBaitStats(w http.ResponseWriter, r *http.Request) {
+	if s.baitTracker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "bait tracker not initialized"})
+		return
+	}
+	stats := s.baitTracker.Stats()
+	writeJSON(w, http.StatusOK, stats)
 }
 
 // requestLogMiddleware 记录每个 HTTP 请求的方法、路径、状态码和耗时

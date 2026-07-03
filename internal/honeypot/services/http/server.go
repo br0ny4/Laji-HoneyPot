@@ -2,6 +2,7 @@ package http
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/bait"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 )
@@ -30,6 +32,9 @@ type Server struct {
 	decoyPageCB         DecoyPageCallback      // 诱饵页面回调（JSP/CS 等完整页面）
 	customTemplates     []CustomTemplate       // YAML 自定义响应模板
 	capturePostCallback CapturePostCallback
+	// Bait/HoneyToken 诱饵系统
+	baitGen     *bait.Generator
+	baitTracker *bait.Tracker
 }
 
 // CustomTemplate 自定义 HTTP 响应模板
@@ -219,6 +224,12 @@ func (s *Server) Handle(conn net.Conn, onBreadcrumb BreadcrumbCallback) {
 			return // 采集后关闭连接（Image 信标无需 keep-alive）
 		}
 
+		// /bait/ 蜜标文件投递 — 攻击者下载诱饵文件时记录追踪事件
+		if strings.HasPrefix(path, "/bait/") {
+			s.handleBaitDelivery(conn, remote, path, httpVersion, headers)
+			return
+		}
+
 		if s.isBreadcrumb(path) {
 			breadcrumbTriggered = true
 			s.logger.Warnw("BREADCRUMB TRIGGERED - ATTACKER DETECTED",
@@ -287,6 +298,12 @@ func (s *Server) SetDecoyPageCallback(fn DecoyPageCallback) {
 // SetCapturePostCallback 设置 POST 请求体捕获回调
 func (s *Server) SetCapturePostCallback(fn CapturePostCallback) {
 	s.capturePostCallback = fn
+}
+
+// SetBaitSystem 注入 Bait/HoneyToken 诱饵系统
+func (s *Server) SetBaitSystem(gen *bait.Generator, tracker *bait.Tracker) {
+	s.baitGen = gen
+	s.baitTracker = tracker
 }
 
 // handleCollectFingerprint 处理浏览器指纹采集请求。
@@ -370,6 +387,92 @@ func (s *Server) handleCollectFingerprint(conn net.Conn, remote, path, _, ua str
 	)
 	conn.Write([]byte(resp))
 	conn.Write(transparentGIF)
+}
+
+// handleBaitDelivery 处理蜜标文件投递请求。
+// 当攻击者访问 /bait/* 路径时，返回对应的诱饵文件并记录追踪事件。
+func (s *Server) handleBaitDelivery(conn net.Conn, remote, path, httpVersion string, headers textproto.MIMEHeader) {
+	if s.baitGen == nil {
+		// Bait system not initialized, return 404
+		resp := "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
+		conn.Write([]byte(resp))
+		return
+	}
+
+	token := s.baitGen.GetByPath(path)
+	if token == nil {
+		// No matching bait token
+		resp := "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
+		conn.Write([]byte(resp))
+		return
+	}
+
+	// Determine Content-Type based on file extension
+	contentType := "text/plain; charset=utf-8"
+	if strings.HasSuffix(token.FileName, ".json") {
+		contentType = "application/json"
+	} else if strings.HasSuffix(token.FileName, ".php") || strings.HasSuffix(token.FileName, ".bak") {
+		contentType = "text/plain; charset=utf-8"
+	} else if strings.HasSuffix(token.FileName, ".yml") || strings.HasSuffix(token.FileName, ".yaml") {
+		contentType = "text/yaml"
+	}
+
+	// Record the bait access event
+	if s.baitTracker != nil {
+		host, _, _ := net.SplitHostPort(remote)
+		ua := headers.Get("User-Agent")
+		referer := headers.Get("Referer")
+
+		// Collect relevant headers
+		hdrMap := make(map[string]string)
+		for _, k := range []string{"Accept", "Accept-Language", "Accept-Encoding", "X-Forwarded-For"} {
+			if v := headers.Get(k); v != "" {
+				hdrMap[k] = v
+			}
+		}
+
+		s.baitTracker.Record(bait.AccessRecord{
+			TokenID:   token.ID,
+			BaitType:  token.Type,
+			RemoteIP:  host,
+			UserAgent: ua,
+			Referer:   referer,
+			Timestamp: time.Now(),
+			Headers:   hdrMap,
+		})
+
+		s.logger.Warnw("BAIT FILE ACCESSED - ATTACKER DOWNLOADING HONEYTOKEN",
+			"remote", remote,
+			"path", path,
+			"bait_type", token.Type,
+			"user-agent", ua,
+		)
+	}
+
+	bodyBytes := []byte(token.Content)
+
+	now := time.Now().UTC()
+	resp := fmt.Sprintf(
+		"%s 200 OK\r\n"+
+			"Date: %s\r\n"+
+			"Server: nginx/1.24.0\r\n"+
+			"Content-Type: %s\r\n"+
+			"Content-Length: %d\r\n"+
+			"Content-Disposition: attachment; filename=\"%s\"\r\n"+
+			"Cache-Control: no-store, no-cache, must-revalidate\r\n"+
+			"Pragma: no-cache\r\n"+
+			"\r\n",
+		httpVersion,
+		now.Format("Mon, 02 Jan 2006 15:04:05 GMT"),
+		contentType,
+		len(bodyBytes),
+		token.FileName,
+	)
+
+	var buf bytes.Buffer
+	buf.WriteString(resp)
+	buf.Write(bodyBytes)
+	conn.Write(buf.Bytes())
 }
 
 // SetCustomTemplates 设置 YAML 自定义响应模板
@@ -578,6 +681,9 @@ func (s *Server) renderPage(path string) string {
 		breadcrumbLinks += fmt.Sprintf("  <!-- <a href=\"%s\">Internal</a> -->\n", bc)
 	}
 
+	// 注入蜜标链接（隐藏的 bait 文件下载链接）
+	baitLinks := s.buildBaitLinks()
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head><title>Welcome | Laji-HoneyPot</title>
@@ -589,15 +695,40 @@ func (s *Server) renderPage(path string) string {
 <h1>Welcome to Nginx</h1>
 <p>Path: %s</p>
 %s
+%s
 <script>%s</script>
 </body>
-</html>`, s.fakeRobotsTxt(), s.fingerprintJS, path, breadcrumbLinks, s.fingerprintJS)
+</html>`, s.fakeRobotsTxt(), s.fingerprintJS, path, breadcrumbLinks, baitLinks, s.fingerprintJS)
 }
 
-// fakeRobotsTxt 在页面中嵌入伪装的 robots.txt 链接，包含面包屑路径
+// buildBaitLinks 生成隐藏在 HTML 中的蜜标下载链接
+// 这些链接在页面中不可见（display:none），正常用户不会注意，
+// 只有扫描器和攻击者会探测并下载，实现精确的威胁行为追踪。
+func (s *Server) buildBaitLinks() string {
+	if s.baitGen == nil {
+		return ""
+	}
+	tokens := s.baitGen.AllTokens()
+	if len(tokens) == 0 {
+		return ""
+	}
+	var links strings.Builder
+	links.WriteString("<!-- Internal Resources -->\n")
+	links.WriteString("<div style=\"display:none\">\n")
+	for _, t := range tokens {
+		url := t.GetURL()
+		links.WriteString(fmt.Sprintf("<a href=\"%s\">%s</a>\n", url, t.Type))
+	}
+	links.WriteString("</div>")
+	return links.String()
+}
+
+// fakeRobotsTxt 在页面中嵌入伪装的 robots.txt 链接，包含面包屑路径和蜜标目录
 func (s *Server) fakeRobotsTxt() string {
 	paths := strings.Join(s.breadcrumbs[:5], "\n")
-	return fmt.Sprintf("<!--\nUser-agent: *\nDisallow: %s\n-->", strings.ReplaceAll(paths, "\n", "\nDisallow: "))
+	disallow := strings.ReplaceAll(paths, "\n", "\nDisallow: ")
+	disallow += "\nDisallow: /bait/"
+	return fmt.Sprintf("<!--\nUser-agent: *\nDisallow: %s\n-->", disallow)
 }
 
 func (s *Server) loginPage() string {

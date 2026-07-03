@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/bait"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
@@ -616,6 +617,13 @@ func (e *Engine) SetCountermeasureProvider(fn func(path, userAgent, remoteIP str
 func (e *Engine) SetDecoyPageProvider(fn httpSvc.DecoyPageCallback) {
 	if e.httpSrv != nil {
 		e.httpSrv.SetDecoyPageCallback(fn)
+	}
+}
+
+// SetBaitSystem 注入蜜标生成器和追踪器到 HTTP 蜜罐服务
+func (e *Engine) SetBaitSystem(gen *bait.Generator, tracker *bait.Tracker) {
+	if e.httpSrv != nil {
+		e.httpSrv.SetBaitSystem(gen, tracker)
 	}
 }
 

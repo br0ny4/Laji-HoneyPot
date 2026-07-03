@@ -1298,6 +1298,36 @@ func (s *Store) AggregateProfileByIP(eng *profile.Engine, ip string) (*profile.A
 	return eng.Analyze(data), nil
 }
 
+// GetCountermeasureSummariesByIP 获取指定 IP 的反制措施摘要列表
+func (s *Store) GetCountermeasureSummariesByIP(ip string) ([]profile.CountermeasureSummary, error) {
+	// 查询 countermeasure_scores 表（含 category/score/timestamp）
+	rows, err := s.db.Query(
+		`SELECT category, score, timestamp, target_ip
+		 FROM countermeasure_scores
+		 WHERE target_ip = ? OR target_ip LIKE ?
+		 ORDER BY timestamp DESC`,
+		ip, ip+":%")
+	if err != nil {
+		return nil, fmt.Errorf("query countermeasure summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []profile.CountermeasureSummary
+	for rows.Next() {
+		var cs profile.CountermeasureSummary
+		var ts string
+		if err := rows.Scan(&cs.OpType, &cs.Score, &ts, &cs.TargetIP); err != nil {
+			continue
+		}
+		cs.Timestamp, _ = time.Parse("2006-01-02 15:04:05", ts)
+		summaries = append(summaries, cs)
+	}
+	if summaries == nil {
+		summaries = []profile.CountermeasureSummary{}
+	}
+	return summaries, rows.Err()
+}
+
 // ttpTacticCN ATT&CK 战术中文名
 func ttpTacticCN(tactic string) string {
 	m := map[string]string{

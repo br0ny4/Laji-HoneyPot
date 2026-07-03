@@ -1,6 +1,34 @@
-# 优化 TODO 清单 — Laji-HoneyPot v0.13.0
+# 优化 TODO 清单 — Laji-HoneyPot v0.16.0
 
-> 生成时间: 2026-07-02 | 更新时间: 2026-07-03 (v0.13.0) | 测试环境: macOS (Manager) + Win11 (Agent)
+> 生成时间: 2026-07-02 | 更新时间: 2026-07-03 (v0.16.0) | 测试环境: macOS (Manager) + Win11 (Agent)
+
+---
+
+## v0.16.0 迭代摘要 (2026-07-03)
+
+**迭代主题: 蜜饵投放系统 (P0) + 攻击者画像 MVP (P1)**
+
+### P0 蜜饵投放系统
+| ID | 内容 | 涉及文件 |
+|----|------|---------|
+| — | 蜜饵生成器：7 类虚假凭证诱饵 (aws_key/db_creds/api_token/ssh_key/git_config/wp_config/env_file)，每文件嵌入唯一追踪种子 | bait/generator.go |
+| — | 访问追踪器：环形缓冲记录下载者 IP/UA/时间戳，支持按 IP/类型过滤和统计 | bait/tracker.go |
+| — | HTTP 蜜罐集成：隐藏诱饵链接注入 + /bait/ 路径服务 + robots.txt 声明 | honeypot/services/http/server.go |
+| — | 管理 API：/api/bait/tokens + /api/bait/access + /api/bait/stats | core/api/server.go |
+
+### P1 攻击者画像 MVP
+| ID | 内容 | 涉及文件 |
+|----|------|---------|
+| — | 画像构建器：聚合攻击/指纹/反制/蜜饵数据，计算风险评分(0-100)，自动匹配行为标签 (scanner/credential_harvester/vulnerability_probe/brute_force/ransomware_interest) | profile/builder.go |
+| — | 数据模型：含 AttacksSummary/FingerprintSummary/CountermeasureSummary/BaitSummary | profile/model.go |
+| — | 管理 API：/api/profile/attackers?limit= + /api/profile/attacker?ip= | core/api/server.go |
+
+### 单元测试
+- bait_test.go: 23/23 PASS
+- builder_test.go: 5/5 PASS
+- 全量: 30/30 包，0 FAIL，go vet 零预警
+
+---
 
 ---
 

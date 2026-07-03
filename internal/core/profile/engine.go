@@ -11,30 +11,31 @@ import (
 
 // AttackerProfile 攻击者完整画像
 type AttackerProfile struct {
-	IP                 string              `json:"ip"`
-	FirstSeen          time.Time           `json:"first_seen"`
-	LastSeen           time.Time           `json:"last_seen"`
-	TotalConnections   int                 `json:"total_connections"`
-	TotalAttacks       int                 `json:"total_attacks"`
-	TotalBreadcrumbs   int                 `json:"total_breadcrumbs"`
-	TotalFingerprints  int                 `json:"total_fingerprints"`
-	TotalCountermeasures int               `json:"total_countermeasures"`
-	TotalPostBodies    int                 `json:"total_post_bodies"`
-	UniqueServices     []string            `json:"unique_services"`
-	UniquePaths        []string            `json:"unique_paths"`
-	PortScanCount      int                 `json:"port_scan_count"`
-	AvgReqPerMinute    float64             `json:"avg_req_per_minute"`
-	PeakHour           int                 `json:"peak_hour"`
-	ActiveDays         int                 `json:"active_days"`
-	InteractionDepth   int                 `json:"interaction_depth"` // 面包屑触发数占访问数比例(bp)
-	ToolSignatures     []string            `json:"tool_signatures"`
-	TTPSignatures      []TTPSignature      `json:"ttp_signatures"`
-	GEO                *GEOInfo            `json:"geo,omitempty"`
-	FingerprintSummary *FingerprintSummary `json:"fingerprint_summary,omitempty"`
-	Tags               []ProfileTag        `json:"tags"`
-	SkillScore         int                 `json:"skill_score"`      // 0-100
-	RiskScore          int                 `json:"risk_score"`       // 0-100
-	ThreatLevel        string              `json:"threat_level"`     // low/medium/high/critical
+	IP                   string                  `json:"ip"`
+	FirstSeen            time.Time               `json:"first_seen"`
+	LastSeen             time.Time               `json:"last_seen"`
+	TotalConnections     int                     `json:"total_connections"`
+	TotalAttacks         int                     `json:"total_attacks"`
+	TotalBreadcrumbs     int                     `json:"total_breadcrumbs"`
+	TotalFingerprints    int                     `json:"total_fingerprints"`
+	TotalCountermeasures int                     `json:"total_countermeasures"`
+	Countermeasures      []CountermeasureSummary `json:"countermeasures,omitempty"`
+	TotalPostBodies      int                     `json:"total_post_bodies"`
+	UniqueServices       []string                `json:"unique_services"`
+	UniquePaths          []string                `json:"unique_paths"`
+	PortScanCount        int                     `json:"port_scan_count"`
+	AvgReqPerMinute      float64                 `json:"avg_req_per_minute"`
+	PeakHour             int                     `json:"peak_hour"`
+	ActiveDays           int                     `json:"active_days"`
+	InteractionDepth     int                     `json:"interaction_depth"` // 面包屑触发数占访问数比例(bp)
+	ToolSignatures       []string                `json:"tool_signatures"`
+	TTPSignatures        []TTPSignature          `json:"ttp_signatures"`
+	GEO                  *GEOInfo                `json:"geo,omitempty"`
+	FingerprintSummary   *FingerprintSummary     `json:"fingerprint_summary,omitempty"`
+	Tags                 []ProfileTag            `json:"tags"`
+	SkillScore           int                     `json:"skill_score"`  // 0-100
+	RiskScore            int                     `json:"risk_score"`   // 0-100
+	ThreatLevel          string                  `json:"threat_level"` // low/medium/high/critical
 }
 
 // TTPSignature ATT&CK 技术签名
@@ -54,14 +55,14 @@ type GEOInfo struct {
 
 // FingerprintSummary 指纹摘要
 type FingerprintSummary struct {
-	Browser     string `json:"browser,omitempty"`
-	OS          string `json:"os,omitempty"`
-	GPU         string `json:"gpu,omitempty"`
-	Screen      string `json:"screen,omitempty"`
-	Timezone    string `json:"timezone,omitempty"`
-	InnerIP     string `json:"inner_ip,omitempty"`
-	HardwareCPUs int   `json:"hardware_cpus,omitempty"`
-	DeviceMemory int   `json:"device_memory,omitempty"`
+	Browser      string `json:"browser,omitempty"`
+	OS           string `json:"os,omitempty"`
+	GPU          string `json:"gpu,omitempty"`
+	Screen       string `json:"screen,omitempty"`
+	Timezone     string `json:"timezone,omitempty"`
+	InnerIP      string `json:"inner_ip,omitempty"`
+	HardwareCPUs int    `json:"hardware_cpus,omitempty"`
+	DeviceMemory int    `json:"device_memory,omitempty"`
 }
 
 // ProfileTag 画像标签
@@ -103,54 +104,54 @@ func NewEngine() *Engine {
 
 // ProfileData 画像原始数据（从 store 聚合）
 type ProfileData struct {
-	IP                  string
-	FirstSeen           time.Time
-	LastSeen            time.Time
-	TotalConnections    int
-	TotalAttacks        int
-	TotalBreadcrumbs    int
-	TotalFingerprints   int
+	IP                   string
+	FirstSeen            time.Time
+	LastSeen             time.Time
+	TotalConnections     int
+	TotalAttacks         int
+	TotalBreadcrumbs     int
+	TotalFingerprints    int
 	TotalCountermeasures int
-	TotalPostBodies     int
-	UniqueServices      []string
-	UniquePaths         []string
-	PortScanCount       int
-	AvgReqPerMinute     float64       // 由 Analyze 计算并回填
-	ActiveDays          int           // 由 Analyze 计算并回填
-	PeakHour            int           // 由 Analyze 计算并回填
-	ServiceCounts       map[string]int
-	PathCounts          map[string]int
-	HourDistribution    map[int]int   // hour -> count
-	UAs                 []string
-	TTPSignatures       []TTPSignature
-	HasFingerprint      bool
-	FPBrowser           string
-	FPOS                string
-	FPGPU               string
-	FPScreen            string
-	FPTimezone          string
-	FPInnerIP           string
-	FPHardwareCPUs      int
-	FPDeviceMemory      int
+	TotalPostBodies      int
+	UniqueServices       []string
+	UniquePaths          []string
+	PortScanCount        int
+	AvgReqPerMinute      float64 // 由 Analyze 计算并回填
+	ActiveDays           int     // 由 Analyze 计算并回填
+	PeakHour             int     // 由 Analyze 计算并回填
+	ServiceCounts        map[string]int
+	PathCounts           map[string]int
+	HourDistribution     map[int]int // hour -> count
+	UAs                  []string
+	TTPSignatures        []TTPSignature
+	HasFingerprint       bool
+	FPBrowser            string
+	FPOS                 string
+	FPGPU                string
+	FPScreen             string
+	FPTimezone           string
+	FPInnerIP            string
+	FPHardwareCPUs       int
+	FPDeviceMemory       int
 }
 
 // Analyze 执行多维度画像分析
 func (e *Engine) Analyze(data *ProfileData) *AttackerProfile {
 	profile := &AttackerProfile{
-		IP:                 data.IP,
-		FirstSeen:          data.FirstSeen,
-		LastSeen:           data.LastSeen,
-		TotalConnections:   data.TotalConnections,
-		TotalAttacks:       data.TotalAttacks,
-		TotalBreadcrumbs:   data.TotalBreadcrumbs,
-		TotalFingerprints:  data.TotalFingerprints,
+		IP:                   data.IP,
+		FirstSeen:            data.FirstSeen,
+		LastSeen:             data.LastSeen,
+		TotalConnections:     data.TotalConnections,
+		TotalAttacks:         data.TotalAttacks,
+		TotalBreadcrumbs:     data.TotalBreadcrumbs,
+		TotalFingerprints:    data.TotalFingerprints,
 		TotalCountermeasures: data.TotalCountermeasures,
-		TotalPostBodies:    data.TotalPostBodies,
-		UniqueServices:     data.UniqueServices,
-		UniquePaths:        data.UniquePaths,
-		PortScanCount:      data.PortScanCount,
-		TTPSignatures:      data.TTPSignatures,
-		Tags:               make([]ProfileTag, 0),
+		TotalPostBodies:      data.TotalPostBodies,
+		UniqueServices:       data.UniqueServices,
+		UniquePaths:          data.UniquePaths,
+		PortScanCount:        data.PortScanCount,
+		TTPSignatures:        data.TTPSignatures,
+		Tags:                 make([]ProfileTag, 0),
 	}
 
 	// 活动指标 — 回填至 data 供子函数使用
@@ -173,14 +174,14 @@ func (e *Engine) Analyze(data *ProfileData) *AttackerProfile {
 	// 指纹
 	if data.HasFingerprint {
 		profile.FingerprintSummary = &FingerprintSummary{
-			Browser:       data.FPBrowser,
-			OS:            data.FPOS,
-			GPU:           data.FPGPU,
-			Screen:        data.FPScreen,
-			Timezone:      data.FPTimezone,
-			InnerIP:       data.FPInnerIP,
-			HardwareCPUs:  data.FPHardwareCPUs,
-			DeviceMemory:  data.FPDeviceMemory,
+			Browser:      data.FPBrowser,
+			OS:           data.FPOS,
+			GPU:          data.FPGPU,
+			Screen:       data.FPScreen,
+			Timezone:     data.FPTimezone,
+			InnerIP:      data.FPInnerIP,
+			HardwareCPUs: data.FPHardwareCPUs,
+			DeviceMemory: data.FPDeviceMemory,
 		}
 	}
 
