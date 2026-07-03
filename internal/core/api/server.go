@@ -1,6 +1,8 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -22,6 +24,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot"
+	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/countermeasure"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/vulndb"
@@ -208,6 +211,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/cluster/nodes", s.handleClusterNodes)
 	// Agent 生成引擎
 	s.mux.HandleFunc("/api/cluster/agent/generate", s.handleAgentGenerate)
+	s.mux.HandleFunc("/api/cluster/agent/package", s.handleAgentPackage) // v0.17.1: 部署包下载
 	// 集群事件聚合
 	s.mux.HandleFunc("/api/cluster/events", s.handleClusterEvents)
 	// 陷阱配置
@@ -1112,6 +1116,79 @@ func (s *Server) handleAgentGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, artifact)
+}
+
+// handleAgentPackage 提供 Agent 部署包下载 (v0.17.1)
+// GET /api/cluster/agent/package?os=linux|windows&scenario=web&node=mynode
+// 返回 ZIP 包包含 config.yaml + deploy script + README (不含二进制)
+func (s *Server) handleAgentPackage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET required"})
+		return
+	}
+
+	if s.clusterGen == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent generator not available"})
+		return
+	}
+
+	osTarget := r.URL.Query().Get("os")
+	if osTarget == "" {
+		osTarget = "linux"
+	}
+	scenario := r.URL.Query().Get("scenario")
+	if scenario == "" {
+		scenario = "web"
+	}
+	nodeName := r.URL.Query().Get("node")
+
+	// 使用管理端自身地址作为默认 manager_addr
+	managerAddr := r.Host
+
+	req := cluster.AgentDeployRequest{
+		ManagerAddr: managerAddr,
+		Scenario:    traps.TrapScenario(scenario),
+		OSTarget:    osTarget,
+		NodeName:    nodeName,
+	}
+
+	artifact, err := s.clusterGen.Generate(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// 构建 ZIP
+	var buf bytes.Buffer
+	zipWriter := zip.NewWriter(&buf)
+
+	// config.yaml
+	cfgFile, _ := zipWriter.Create("config.yaml")
+	cfgFile.Write([]byte(artifact.ConfigYAML))
+
+	// deploy script
+	if osTarget == "windows" {
+		psFile, _ := zipWriter.Create("deploy.ps1")
+		psFile.Write([]byte(artifact.InstallScriptPS))
+	} else {
+		shFile, _ := zipWriter.Create("deploy.sh")
+		shFile.Write([]byte(artifact.DeployScript))
+	}
+
+	// README (manual guide)
+	readmeFile, _ := zipWriter.Create("README.txt")
+	readmeFile.Write([]byte(artifact.ManualGuide))
+
+	zipWriter.Close()
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="honeypot-agent-%s-%s.zip"`, osTarget, scenario))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", buf.Len()))
+	w.WriteHeader(http.StatusOK)
+	w.Write(buf.Bytes())
+
+	s.logger.Infow("agent package served", "os", osTarget, "scenario", scenario, "size_bytes", buf.Len())
 }
 
 // ============================================================

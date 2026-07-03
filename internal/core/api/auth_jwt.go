@@ -437,9 +437,14 @@ func isExemptPath(path string) bool {
 		"/api/collect",
 		"/api/events",
 		"/api/countermeasure/exfil",
+		"/api/cluster/agent/package", // v0.17.1: 部署包下载无需认证
 	}
 	for _, ep := range exemptPaths {
-		if path == ep {
+		if path == ep || (strings.Contains(ep, "?") && ep == path) {
+			return true
+		}
+		// 豁免带 query 参数的端点（如 /api/cluster/agent/package?os=linux）
+		if strings.HasPrefix(path, ep+"?") {
 			return true
 		}
 	}

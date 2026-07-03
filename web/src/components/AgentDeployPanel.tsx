@@ -31,7 +31,15 @@ interface AgentDeployArtifact {
   install_script_ps: string;
   service_config: string;
   binary_name: string;
+  // v0.17.1: 双模式部署
+  pull_command: string;
+  manual_guide: string;
+  package_url: string;
+  file_list: { name: string; description: string }[];
+  build_command: string;
 }
+
+type DeployMode = 'manual' | 'pull';
 
 const SCENARIO_LABELS: Record<string, string> = {
   web: 'Web 业务',
@@ -75,6 +83,7 @@ export default function AgentDeployPanel() {
   const [customURL, setCustomURL] = useState('');
   const [nodeName, setNodeName] = useState('');
   const [osTarget, setOsTarget] = useState<'linux' | 'windows'>('linux');
+  const [deployMode, setDeployMode] = useState<DeployMode>('pull');  // v0.17.1: 部署模式
 
   // 结果状态
   const [artifact, setArtifact] = useState<AgentDeployArtifact | null>(null);
@@ -84,7 +93,7 @@ export default function AgentDeployPanel() {
 
   // 场景元数据
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
-  const [activeTab, setActiveTab] = useState<'config' | 'cli' | 'script' | 'ps' | 'service'>('cli');
+  const [activeTab, setActiveTab] = useState<'config' | 'cli' | 'script' | 'ps' | 'service' | 'pull' | 'manual' | 'build'>('cli');
 
   // 可用的所有服务
   const allServices = ['http', 'mysql', 'redis', 'ssh', 'ftp', 'ldap', 'dns', 'smb', 'rdp'];
@@ -203,6 +212,29 @@ export default function AgentDeployPanel() {
                 placeholder="web-node-01"
               />
             </div>
+          </div>
+
+          <div className="form-group">
+            <label>部署模式</label>
+            <div className="scenario-selector">
+              <button
+                className={`scenario-btn ${deployMode === 'pull' ? 'active' : ''}`}
+                onClick={() => setDeployMode('pull')}
+              >
+                一键拉取
+              </button>
+              <button
+                className={`scenario-btn ${deployMode === 'manual' ? 'active' : ''}`}
+                onClick={() => setDeployMode('manual')}
+              >
+                手动部署
+              </button>
+            </div>
+            <span className="form-hint">
+              {deployMode === 'pull'
+                ? '目标主机执行命令从管理端拉取所有文件并自动启动'
+                : '本地编译二进制后手动发送到目标主机，通过脚本启动'}
+            </span>
           </div>
 
           <div className="form-group">
@@ -353,44 +385,124 @@ export default function AgentDeployPanel() {
           <div className="deploy-result">
             <h3>部署产出物</h3>
 
+            {/* 部署模式切换 */}
+            <div className="form-group" style={{marginBottom: '1rem'}}>
+              <label>部署模式</label>
+              <div className="scenario-selector">
+                <button
+                  className={`scenario-btn ${deployMode === 'pull' ? 'active' : ''}`}
+                  onClick={() => { setDeployMode('pull'); setActiveTab('pull'); }}
+                >
+                  一键拉取
+                </button>
+                <button
+                  className={`scenario-btn ${deployMode === 'manual' ? 'active' : ''}`}
+                  onClick={() => { setDeployMode('manual'); setActiveTab('manual'); }}
+                >
+                  手动部署
+                </button>
+              </div>
+            </div>
+
             {/* Tab 切换 */}
             <div className="result-tabs">
-              <button
-                className={`tab-btn ${activeTab === 'cli' ? 'active' : ''}`}
-                onClick={() => setActiveTab('cli')}
-              >
-                CLI 一键命令
-              </button>
-              <button
-                className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`}
-                onClick={() => setActiveTab('script')}
-              >
-                {osTarget === 'linux' ? '部署脚本 (bash)' : '部署脚本'}
-              </button>
-              <button
-                className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`}
-                onClick={() => setActiveTab('config')}
-              >
-                config.yaml
-              </button>
-              {osTarget === 'windows' && (
-                <button
-                  className={`tab-btn ${activeTab === 'ps' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('ps')}
-                >
-                  PowerShell
-                </button>
+              {deployMode === 'pull' ? (
+                <>
+                  <button className={`tab-btn ${activeTab === 'pull' ? 'active' : ''}`} onClick={() => setActiveTab('pull')}>
+                    拉取命令
+                  </button>
+                  <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>
+                    config.yaml
+                  </button>
+                  <button className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`} onClick={() => setActiveTab('script')}>
+                    部署脚本
+                  </button>
+                  {osTarget === 'windows' && (
+                    <button className={`tab-btn ${activeTab === 'ps' ? 'active' : ''}`} onClick={() => setActiveTab('ps')}>
+                      PowerShell
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button className={`tab-btn ${activeTab === 'manual' ? 'active' : ''}`} onClick={() => setActiveTab('manual')}>
+                    部署指引
+                  </button>
+                  <button className={`tab-btn ${activeTab === 'build' ? 'active' : ''}`} onClick={() => setActiveTab('build')}>
+                    编译命令
+                  </button>
+                  <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>
+                    config.yaml
+                  </button>
+                  <button className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`} onClick={() => setActiveTab('script')}>
+                    部署脚本
+                  </button>
+                </>
               )}
+              <button className={`tab-btn ${activeTab === 'cli' ? 'active' : ''}`} onClick={() => setActiveTab('cli')}>
+                CLI 命令
+              </button>
               <button className={`tab-btn ${activeTab === 'service' ? 'active' : ''}`} onClick={() => setActiveTab('service')}>
-                服务注册
+                文件清单
               </button>
             </div>
 
-            {/* CLI 命令 */}
+            {/* 一键拉取命令 */}
+            {activeTab === 'pull' && (
+              <div className="result-section">
+                <div className="result-header">
+                  <span className="result-label">
+                    在目标主机上执行以下命令即可自动拉取部署：
+                  </span>
+                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.pull_command)}>
+                    复制命令
+                  </button>
+                </div>
+                <pre className="code-block cmd-block">{artifact.pull_command}</pre>
+                <div className="verify-section" style={{marginTop: '1rem'}}>
+                  <p style={{color: '#666', fontSize: '0.85rem', marginBottom: '0.5rem'}}>
+                    此命令会自动从管理端下载配置文件和部署脚本，从 GitHub Releases 拉取预编译二进制，完成部署后自动注册并启动服务。
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* 手动部署指引 */}
+            {activeTab === 'manual' && (
+              <div className="result-section">
+                <div className="result-header">
+                  <span className="result-label">手动部署完整指引：</span>
+                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.manual_guide)}>
+                    复制指引
+                  </button>
+                </div>
+                <pre className="code-block">{artifact.manual_guide}</pre>
+              </div>
+            )}
+
+            {/* 编译命令 */}
+            {activeTab === 'build' && (
+              <div className="result-section">
+                <div className="result-header">
+                  <span className="result-label">本地交叉编译命令 (macOS/Linux 上执行)：</span>
+                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.build_command)}>
+                    复制命令
+                  </button>
+                </div>
+                <pre className="code-block cmd-block">{artifact.build_command}</pre>
+                <div className="verify-section" style={{marginTop: '1rem'}}>
+                  <p style={{color: '#666', fontSize: '0.85rem', marginBottom: '0.5rem'}}>
+                    编译完成后将生成 {artifact.binary_name}（约14MB），将其与部署脚本和配置文件一同发送到目标主机，然后执行部署脚本即可。
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* CLI 命令 (保留兼容两种模式) */}
             {activeTab === 'cli' && (
               <div className="result-section">
                 <div className="result-header">
-                  <span className="result-label">在目标主机上执行以下命令即可完成部署：</span>
+                  <span className="result-label">快速一键命令（从 Release 下载 + 配置 + 启动）：</span>
                   <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.cli_command)}>
                     复制命令
                   </button>
@@ -403,7 +515,9 @@ export default function AgentDeployPanel() {
             {activeTab === 'script' && (
               <div className="result-section">
                 <div className="result-header">
-                  <span className="result-label">完整 bash 部署脚本（含 systemd 服务注册）：</span>
+                  <span className="result-label">
+                    {osTarget === 'linux' ? 'Bash 自动部署脚本（含 systemd 服务注册）：' : '部署脚本：'}
+                  </span>
                   <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.deploy_script)}>
                     复制脚本
                   </button>
@@ -429,7 +543,7 @@ export default function AgentDeployPanel() {
             {activeTab === 'config' && (
               <div className="result-section">
                 <div className="result-header">
-                  <span className="result-label">Agent 配置文件（如需手动部署）：</span>
+                  <span className="result-label">Agent 配置文件：</span>
                   <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.config_yaml)}>
                     复制配置
                   </button>
@@ -438,16 +552,38 @@ export default function AgentDeployPanel() {
               </div>
             )}
 
-            {/* 服务注册配置 */}
+            {/* 文件清单 */}
             {activeTab === 'service' && (
               <div className="result-section">
                 <div className="result-header">
-                  <span className="result-label">服务注册配置：</span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.service_config)}>
-                    复制配置
+                  <span className="result-label">部署包文件清单：</span>
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={() => {
+                      const baseUrl = window.location.origin;
+                      const url = `${baseUrl}${artifact.package_url}`;
+                      window.open(url, '_blank');
+                    }}
+                  >
+                    下载部署包 (ZIP)
                   </button>
                 </div>
-                <pre className="code-block">{artifact.service_config}</pre>
+                <table className="file-list-table" style={{width: '100%', borderCollapse: 'collapse', marginTop: '0.5rem'}}>
+                  <thead>
+                    <tr style={{background: '#f5f5f5', textAlign: 'left'}}>
+                      <th style={{padding: '8px 12px', borderBottom: '2px solid #ddd'}}>文件名</th>
+                      <th style={{padding: '8px 12px', borderBottom: '2px solid #ddd'}}>说明</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {artifact.file_list.map((f, i) => (
+                      <tr key={i} style={{borderBottom: '1px solid #eee'}}>
+                        <td style={{padding: '8px 12px', fontFamily: 'monospace', fontWeight: 600}}>{f.name}</td>
+                        <td style={{padding: '8px 12px', color: '#666', fontSize: '0.9rem'}}>{f.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 

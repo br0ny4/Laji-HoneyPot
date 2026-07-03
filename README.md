@@ -9,10 +9,10 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
-        <!-- BEGIN-AUTO:TESTS -->
+          <!-- BEGIN-AUTO:TESTS -->
   <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-29%2F29%20PASS-brightgreen" alt="Tests" /></a>
   <!-- END-AUTO:TESTS -->
-        <!-- BEGIN-AUTO:VERSION -->
+          <!-- BEGIN-AUTO:VERSION -->
   <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.17.0-blue" alt="Version" /></a>
   <!-- END-AUTO:VERSION -->
 </p>

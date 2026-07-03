@@ -15,6 +15,14 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 )
 
+// DeployMode deployment mode
+type DeployMode string
+
+const (
+	DeployManual DeployMode = "manual" // 手动编译 + 打包发送
+	DeployPull   DeployMode = "pull"   // 目标主机从管理端拉取
+)
+
 // AgentDeployRequest 前端提交的 Agent 部署配置请求
 type AgentDeployRequest struct {
 	ManagerAddr    string             `json:"manager_addr"`    // 管理端地址 (必填)
@@ -33,7 +41,7 @@ type AgentDeployArtifact struct {
 	Scenario        traps.TrapScenario `json:"scenario"`          // 陷阱场景
 	EnabledSvcs     []string           `json:"enabled_svcs"`      // 启用的服务列表
 	ConfigYAML      string             `json:"config_yaml"`       // 生成的 config.yaml 内容
-	CLICommand      string             `json:"cli_command"`       // 一键命令行（适用于目标主机直接执行）
+	CLICommand      string             `json:"cli_command"`       // 一键命令行（手动部署：从 Release 拉取二进制）
 	DeployScript    string             `json:"deploy_script"`     // 完整部署脚本
 	DockerCommand   string             `json:"docker_command"`    // Docker 部署命令 (可选)
 	VerifyHint      string             `json:"verify_hint"`       // 注册校验提示
@@ -41,6 +49,19 @@ type AgentDeployArtifact struct {
 	InstallScriptPS string             `json:"install_script_ps"` // Windows PowerShell 安装脚本
 	ServiceConfig   string             `json:"service_config"`    // 平台特定的服务配置
 	BinaryName      string             `json:"binary_name"`       // 平台特定的二进制文件名
+	// v0.17.1: 双模式部署升级
+	PullCommand  string       `json:"pull_command"`  // 从管理端拉取部署的一键命令
+	ManualGuide  string       `json:"manual_guide"`  // 手动编译+打包部署的完整指引
+	PackageURL   string       `json:"package_url"`   // 管理端提供的部署包下载 URL (含 config+scripts, 不含二进制)
+	FileList     []DeployFile `json:"file_list"`     // 部署包内文件清单
+	BuildCommand string       `json:"build_command"` // 本地编译命令（交叉编译）
+}
+
+// DeployFile deploy package file descriptor
+type DeployFile struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content"` // base64 or inline
 }
 
 // BinarySource 二进制获取方式
@@ -119,6 +140,17 @@ func (g *Generator) Generate(req AgentDeployRequest) (*AgentDeployArtifact, erro
 		serviceConfig = g.buildWindowsServiceConfig(req)
 	}
 
+	// v0.17.1: 双模式部署
+	pullCommand := g.buildPullCommand(req, enabledSvcs)
+	manualGuide := g.buildManualGuide(req, enabledSvcs)
+	fileList := g.buildFileList(req, enabledSvcs)
+	buildCommand := g.buildBuildCommand(req)
+	packageURL := fmt.Sprintf("/api/cluster/agent/package?os=%s&scenario=%s",
+		req.OSTarget, req.Scenario)
+	if req.NodeName != "" {
+		packageURL += "&node=" + req.NodeName
+	}
+
 	return &AgentDeployArtifact{
 		ManagerAddr:     req.ManagerAddr,
 		Scenario:        scenario,
@@ -132,6 +164,11 @@ func (g *Generator) Generate(req AgentDeployRequest) (*AgentDeployArtifact, erro
 		InstallScriptPS: installScriptPS,
 		ServiceConfig:   serviceConfig,
 		BinaryName:      binaryName,
+		PullCommand:     pullCommand,
+		ManualGuide:     manualGuide,
+		PackageURL:      packageURL,
+		FileList:        fileList,
+		BuildCommand:    buildCommand,
 	}, nil
 }
 
@@ -452,5 +489,186 @@ func (g *Generator) buildWindowsServiceConfig(req AgentDeployRequest) string {
 		`sc.exe create HoneypotAgent binPath= "C:\Program Files\Honeypot\honeypot.exe -config C:\Program Files\Honeypot\config.yaml%s" start= auto displayname= "Laji-HoneyPot Agent"
 sc.exe start HoneypotAgent`,
 		tlsFlag,
+	)
+}
+
+// =========================================================================
+// v0.17.1: 双模式部署 (手动部署 + 一键拉取)
+// =========================================================================
+
+// buildPullCommand 生成从管理端拉取部署的一键命令
+// 目标主机通过此命令从管理端获取 config.yaml + 部署脚本 + 二进制，自动启动
+func (g *Generator) buildPullCommand(req AgentDeployRequest, services []string) string {
+	tlsFlag := ""
+	if req.TLSInsecure {
+		tlsFlag = " --tls-insecure"
+	}
+	binaryName := g.getBinaryName(req)
+
+	if req.OSTarget == "windows" {
+		return g.buildPullCommandWindows(req, services)
+	}
+
+	// Linux: curl 下载部署包 + go build 编译二进制
+	return fmt.Sprintf(
+		`# 从管理端拉取 Agent 部署包并自动启动
+# 管理端地址: %s
+curl -sSL http://%s/api/cluster/agent/package?os=linux -o /tmp/agent.tar.gz && \
+tar xzf /tmp/agent.tar.gz -C /opt/honeypot/ && \
+chmod +x /opt/honeypot/deploy.sh && \
+curl -sSL %s/releases/latest/download/%s -o /opt/honeypot/%s && \
+chmod +x /opt/honeypot/%s && \
+cd /opt/honeypot && sudo bash deploy.sh%s`,
+		req.ManagerAddr, req.ManagerAddr,
+		g.RepoURL, binaryName, binaryName, binaryName,
+		tlsFlag,
+	)
+}
+
+// buildPullCommandWindows Windows 版拉取命令
+func (g *Generator) buildPullCommandWindows(req AgentDeployRequest, services []string) string {
+	binaryName := g.getBinaryName(req)
+
+	return fmt.Sprintf(
+		`# 从管理端拉取 Agent 部署包并自动启动 (PowerShell)
+# 管理端地址: %s
+$mgmt = "%s"
+Invoke-WebRequest -Uri "http://$mgmt/api/cluster/agent/package?os=windows" -OutFile $env:TEMP\agent.zip
+Expand-Archive -Path $env:TEMP\agent.zip -DestinationPath "$env:ProgramFiles\Honeypot" -Force
+Invoke-WebRequest -Uri "%s/releases/latest/download/%s" -OutFile "$env:ProgramFiles\Honeypot\%s"
+powershell -ExecutionPolicy Bypass -File "$env:ProgramFiles\Honeypot\deploy.ps1"`,
+		req.ManagerAddr, req.ManagerAddr,
+		g.RepoURL, binaryName, binaryName,
+	)
+}
+
+// buildManualGuide 生成手动编译+打包部署的完整指引
+func (g *Generator) buildManualGuide(req AgentDeployRequest, services []string) string {
+	binaryName := g.getBinaryName(req)
+	svcList := strings.Join(services, ", ")
+
+	goos := "linux"
+	goarch := "amd64"
+	if req.OSTarget == "windows" {
+		goos = "windows"
+	}
+
+	return fmt.Sprintf(
+		`============================================
+  Laji-HoneyPot Agent 手动部署指引
+============================================
+
+目标系统: %s (%s/%s)
+管理端地址: %s
+启用服务: %s (%d 个)
+二进制文件: %s
+
+--- 步骤 1: 本地编译 Agent ---
+在本机 (macOS/Linux) 上执行以下交叉编译命令:
+
+  GOOS=%s GOARCH=%s CGO_ENABLED=0 go build -ldflags="-s -w" -o %s ./cmd/honeypot/
+
+编译完成后将生成 %s (约 14MB)
+
+--- 步骤 2: 准备部署文件 ---
+下载管理端配置包:
+  curl -sSL http://%s/api/cluster/agent/package?os=%s -o agent.tar.gz
+
+或在前端点击"下载部署包"按钮。
+
+部署包内包含:
+  - config.yaml     Agent 配置文件
+  - deploy.sh       自动部署脚本 (Linux) / deploy.ps1 (Windows)
+  - README.txt      部署说明
+
+--- 步骤 3: 发送文件到目标主机 ---
+将以下文件发送到目标主机 %s:
+
+Linux:   scp %s deploy.sh config.yaml user@TARGET:/opt/honeypot/
+Windows: 通过 SMB/USB/远程桌面将 %s deploy.ps1 config.yaml 复制到目标主机
+
+--- 步骤 4: 在目标主机上执行部署 ---
+Linux:
+  sudo bash /opt/honeypot/deploy.sh
+
+Windows (管理员 PowerShell):
+  powershell -ExecutionPolicy Bypass -File C:\Program Files\Honeypot\deploy.ps1
+
+--- 步骤 5: 验证 ---
+  curl http://TARGET_IP:8080/healthz
+  在管理端"集群管理"面板确认节点已上线
+
+============================================
+`,
+		req.OSTarget, goos, goarch,
+		req.ManagerAddr,
+		svcList, len(services),
+		binaryName,
+		goos, goarch, binaryName,
+		binaryName,
+		req.ManagerAddr, req.OSTarget,
+		"TARGET_IP",
+		binaryName, binaryName,
+	)
+}
+
+// buildFileList 生成部署包文件清单
+func (g *Generator) buildFileList(req AgentDeployRequest, services []string) []DeployFile {
+	files := []DeployFile{
+		{
+			Name:        "config.yaml",
+			Description: "Agent 配置文件 — 包含管理端地址、陷阱场景、蜜罐端口等所有运行参数",
+		},
+	}
+
+	if req.OSTarget == "windows" {
+		files = append(files, DeployFile{
+			Name:        "deploy.ps1",
+			Description: "PowerShell 自动部署脚本 — 创建目录、注册 Windows 服务、启动 Agent",
+		})
+		files = append(files, DeployFile{
+			Name:        "setup.ps1",
+			Description: "PowerShell 环境初始化脚本 — 检查依赖、配置防火墙规则",
+		})
+	} else {
+		files = append(files, DeployFile{
+			Name:        "deploy.sh",
+			Description: "Bash 自动部署脚本 — 创建目录、注册 systemd 服务、启动 Agent",
+		})
+	}
+
+	files = append(files, DeployFile{
+		Name:        g.getBinaryName(req),
+		Description: fmt.Sprintf("Agent 可执行文件 — %s/%s 交叉编译, 约 14MB, 需本地编译后放入部署包", g.targetGOOS(req), g.targetGOARCH(req)),
+	})
+
+	files = append(files, DeployFile{
+		Name:        "README.txt",
+		Description: "部署说明文件 — 包含完整的部署步骤、验证方式和故障排查指南",
+	})
+
+	return files
+}
+
+func (g *Generator) targetGOOS(req AgentDeployRequest) string {
+	if req.OSTarget == "windows" {
+		return "windows"
+	}
+	return "linux"
+}
+
+func (g *Generator) targetGOARCH(req AgentDeployRequest) string {
+	return "amd64"
+}
+
+// buildBuildCommand 生成本地交叉编译命令
+func (g *Generator) buildBuildCommand(req AgentDeployRequest) string {
+	goos := g.targetGOOS(req)
+	goarch := g.targetGOARCH(req)
+	binaryName := g.getBinaryName(req)
+
+	return fmt.Sprintf(
+		`GOOS=%s GOARCH=%s CGO_ENABLED=0 go build -ldflags="-s -w" -o %s ./cmd/honeypot/`,
+		goos, goarch, binaryName,
 	)
 }
