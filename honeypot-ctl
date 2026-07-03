@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
-# Laji-HoneyPot 管理端运维工具 v0.13.0
-# 用法: ./honeypot-ctl {start|stop|restart|status|update|logs|help}
+# Laji-HoneyPot 管理端运维工具 v0.17.1
+# 用法: ./honeypot-ctl {start|stop|restart|status|update|logs|build|clean|help}
 # ============================================================
 set -euo pipefail
 
@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$PROJECT_ROOT/.honeypot.pid"
 LOG_FILE="$PROJECT_ROOT/honeypot.log"
-BINARY="$PROJECT_ROOT/honeypot"
+BINARY="$PROJECT_ROOT/bin/honeypot"
 API_ADDR="${API_ADDR:-127.0.0.1:8080}"
 API_URL="http://${API_ADDR}"
 
@@ -30,10 +30,9 @@ log_step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
 
 banner() {
     echo -e "${BOLD}${BLUE}"
-    echo "  ╔══════════════════════════════════════════╗"
-    echo "  ║       Laji-HoneyPot Management CLI       ║"
-    echo "  ║              v0.13.0                     ║"
-    echo "  ╚══════════════════════════════════════════╝"
+    echo "  =============================================="
+    echo "        Laji-HoneyPot Management CLI v0.17.1"
+    echo "  =============================================="
     echo -e "${NC}"
 }
 
@@ -48,7 +47,7 @@ get_pid() {
         fi
     fi
     # 从进程列表查找
-    pgrep -f "honeypot" 2>/dev/null | head -1 || true
+    pgrep -f "bin/honeypot" 2>/dev/null | head -1 || true
 }
 
 # 检查服务是否运行
@@ -60,14 +59,85 @@ is_running() {
 
 # ---------- 核心命令 ----------
 
-cmd_build() {
-    log_step "编译 honeypot 二进制文件..."
+cmd_clean() {
+    log_step "清理编译产物和临时文件..."
     cd "$PROJECT_ROOT"
+    
+    # 停止运行中的服务
+    if is_running; then
+        log_warn "检测到运行中的服务，正在停止..."
+        cmd_stop
+    fi
+
+    # 清理编译产物
+    local cleaned=0
+    if [ -f "$BINARY" ]; then
+        rm -f "$BINARY"
+        log_info "已删除: $BINARY"
+        cleaned=1
+    fi
+    if [ -f "bin/honeypot-windows-amd64.exe" ]; then
+        rm -f bin/honeypot-windows-amd64.exe
+        cleaned=1
+    fi
+    if [ -f "bin/honeypot-linux-amd64" ]; then
+        rm -f bin/honeypot-linux-amd64
+        cleaned=1
+    fi
+    if [ -f "honeypot" ]; then
+        rm -f honeypot
+        cleaned=1
+    fi
+    
+    # 清理部署包产物
+    rm -f deploy/agent-package-*.zip 2>/dev/null || true
+    rm -f deploy/win-agent/honeypot-agent.exe 2>/dev/null || true
+    rm -f deploy/win-agent/agent-package.zip 2>/dev/null || true
+    rm -f deploy/win-agent/config.yaml 2>/dev/null || true
+    rm -f deploy/win-agent/deploy.sh 2>/dev/null || true
+    rm -f deploy/win-agent/README.txt 2>/dev/null || true
+    
+    # 清理前端构建产物
+    if [ -d "web-dist" ]; then
+        rm -rf web-dist
+        log_info "已删除: web-dist/"
+        cleaned=1
+    fi
+
+    # 清理 PID 文件和日志
+    rm -f "$PID_FILE"
+    
+    # Go 构建缓存清理
+    go clean -cache 2>/dev/null || true
+    
+    if [ "$cleaned" -eq 0 ]; then
+        log_info "没有需要清理的文件"
+    else
+        log_info "清理完成"
+    fi
+}
+
+cmd_build() {
+    log_step "编译 honeypot 二进制文件 (覆盖旧产物)..."
+    cd "$PROJECT_ROOT"
+    
+    # 确保 bin/ 目录存在
+    mkdir -p bin/
+    
+    # 编译前删除旧二进制（覆盖规则）
+    rm -f "$BINARY"
+    
+    # Go mod 依赖检查
+    if [ ! -f "go.sum" ]; then
+        log_step "下载 Go 依赖..."
+        go mod download 2>&1 || true
+    fi
+    
     if ! go build -o "$BINARY" ./cmd/honeypot/ 2>&1; then
         log_error "编译失败，请检查 Go 环境和项目依赖"
         return 1
     fi
-    log_info "编译成功: $BINARY"
+    log_info "编译成功: $BINARY ($(du -sh "$BINARY" 2>/dev/null | cut -f1))"
 }
 
 cmd_start() {
@@ -82,7 +152,7 @@ cmd_start() {
 
     # 检查二进制文件
     if [ ! -f "$BINARY" ]; then
-        log_info "未找到编译产物，自动编译中..."
+        log_info "未找到编译产物 ($BINARY)，自动编译中..."
         cmd_build || return 1
     fi
 
@@ -155,7 +225,7 @@ cmd_status() {
     pid=$(get_pid)
 
     echo -e "${BOLD}Laji-HoneyPot 服务状态${NC}"
-    echo "──────────────────────────────────"
+    echo "------------------------------------------"
 
     if [ -z "$pid" ]; then
         echo -e "  状态:     ${RED}未运行${NC}"
@@ -183,16 +253,16 @@ cmd_status() {
     # API 健康检查
     echo ""
     echo -e "${BOLD}API 健康检查${NC}"
-    echo "──────────────────────────────────"
-    local hc_code hc_body hc_time
+    echo "------------------------------------------"
+    local hc_output hc_code hc_time
     hc_output=$(curl -s -w "\n%{http_code}\n%{time_total}" "$API_URL/healthz" 2>/dev/null || true)
-    hc_body=$(echo "$hc_output" | head -n -2)
     hc_code=$(echo "$hc_output" | tail -2 | head -1)
     hc_time=$(echo "$hc_output" | tail -1)
 
     case "$hc_code" in
         200)
             echo -e "  /healthz:  ${GREEN}$hc_code OK${NC} (${hc_time}s)"
+            hc_body=$(echo "$hc_output" | head -n -2)
             echo "  响应:     $hc_body"
             ;;
         *)
@@ -207,7 +277,7 @@ cmd_status() {
     if [ "$svc_code" = "200" ]; then
         echo ""
         echo -e "${BOLD}蜜罐服务运行状态${NC}"
-        echo "──────────────────────────────────"
+        echo "------------------------------------------"
         echo "$svc_output" | head -n -1 | python3 -m json.tool 2>/dev/null || echo "$svc_output"
     fi
 
@@ -253,17 +323,18 @@ cmd_update() {
     local old_ver
     old_ver=$(grep 'const Version' internal/core/version.go 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "unknown")
 
-    # 4. 停止旧服务
+    # 4. 清理旧产物（覆盖规则）然后编译
     local was_running=false
     if is_running; then
         was_running=true
         cmd_stop
     fi
 
-    # 5. 编译
+    # 覆盖旧编译产物
+    cmd_clean
     cmd_build || return 1
 
-    # 6. 构建前端（如果 web/ 存在且有变更）
+    # 5. 构建前端（如果 web/ 存在且有变更）
     if [ -d "$PROJECT_ROOT/web" ] && [ -f "$PROJECT_ROOT/web/package.json" ]; then
         log_step "检查前端是否需要重新构建..."
         if [ -d "$PROJECT_ROOT/web/node_modules" ]; then
@@ -286,7 +357,7 @@ cmd_update() {
         fi
     fi
 
-    # 7. 重启服务
+    # 6. 重启服务
     if [ "$was_running" = true ]; then
         log_step "重启服务..."
         sleep 1
@@ -295,18 +366,18 @@ cmd_update() {
         log_info "更新完成。如需启动服务请执行: $0 start"
     fi
 
-    # 8. 显示版本变更
+    # 7. 显示版本变更
     local new_ver
     new_ver=$(grep 'const Version' internal/core/version.go 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "unknown")
     echo ""
-    log_info "版本更新: ${old_ver} → ${new_ver}"
+    log_info "版本更新: ${old_ver} -> ${new_ver}"
 }
 
 cmd_logs() {
     local lines="${1:-50}"
     if [ -f "$LOG_FILE" ]; then
         echo -e "${BOLD}最近 $lines 行日志 ($LOG_FILE)${NC}"
-        echo "──────────────────────────────────"
+        echo "------------------------------------------"
         tail -n "$lines" "$LOG_FILE"
     else
         log_warn "日志文件不存在: $LOG_FILE"
@@ -316,16 +387,17 @@ cmd_logs() {
 # ---------- 帮助 ----------
 cmd_help() {
     banner
-    echo "用法: $0 {start|stop|restart|status|update|logs|build|help}"
+    echo "用法: $0 {start|stop|restart|status|update|logs|build|clean|help}"
     echo ""
     echo "命令:"
     echo "  start     编译并启动 honeypot 服务"
     echo "  stop      停止 honeypot 服务"
     echo "  restart   重启 honeypot 服务"
     echo "  status    查看服务运行状态、API 健康检查、蜜罐服务状态"
-    echo "  update    一键更新: 拉取最新代码 → 编译 → 重启"
+    echo "  update    一键更新: git pull -> clean -> build -> 重启"
     echo "  logs [N]  查看最近 N 行日志 (默认 50)"
-    echo "  build     仅编译（不启动服务）"
+    echo "  build     编译二进制 (自动删除旧产物, 覆盖写入 bin/honeypot)"
+    echo "  clean     清理所有编译产物、构建缓存、部署包临时文件"
     echo "  help      显示帮助信息"
     echo ""
     echo "环境变量:"
@@ -334,14 +406,21 @@ cmd_help() {
     echo "文件:"
     echo "  PID 文件:   $PID_FILE"
     echo "  日志文件:   $LOG_FILE"
-    echo "  配置文件:   $PROJECT_ROOT/config.yaml"
+    echo "  配置:       $PROJECT_ROOT/config.yaml"
+    echo "  二进制:     $BINARY"
+    echo ""
+    echo "测试:"
+    echo "  全量测试:   bash scripts/full-test.sh"
+    echo "  快速验证:   bash deploy/quick-verify.sh"
     echo ""
     echo "示例:"
-    echo "  $0 start                    # 启动服务"
-    echo "  $0 status                   # 查看状态"
-    echo "  API_ADDR=0.0.0.0:8080 $0 start  # 指定地址启动"
+    echo "  $0 start                    # 编译 + 启动"
+    echo "  $0 build                    # 仅编译 (覆盖旧产物)"
+    echo "  $0 clean                    # 清理所有产物"
+    echo "  $0 status                   # 查看运行状态"
     echo "  $0 update                   # 一键更新到最新版本"
-    echo "  $0 logs 100                 # 查看最近 100 行日志"
+    echo "  $0 logs 100                 # 最近 100 行日志"
+    echo "  $0 restart                  # 重启服务"
 }
 
 # ---------- 入口 ----------
@@ -353,6 +432,7 @@ case "${1:-help}" in
     update)   cmd_update ;;
     logs)     cmd_logs "${2:-50}" ;;
     build)    cmd_build ;;
+    clean)    cmd_clean ;;
     help|--help|-h) cmd_help ;;
     *)
         log_error "未知命令: ${1:-}"

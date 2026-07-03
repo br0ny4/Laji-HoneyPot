@@ -9,10 +9,10 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
-            <!-- BEGIN-AUTO:TESTS -->
+              <!-- BEGIN-AUTO:TESTS -->
   <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-29%2F29%20PASS-brightgreen" alt="Tests" /></a>
   <!-- END-AUTO:TESTS -->
-            <!-- BEGIN-AUTO:VERSION -->
+              <!-- BEGIN-AUTO:VERSION -->
   <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.17.0-blue" alt="Version" /></a>
   <!-- END-AUTO:VERSION -->
 </p>
@@ -74,7 +74,7 @@ bash install.sh
 
 ## 运维管理 CLI
 
-`honeypot-ctl` 是管理端的标准化命令行运维工具，支持一键启停、版本更新、状态诊断。
+`honeypot-ctl` 是管理端的标准化命令行运维工具（v0.17.1），支持一键启停、版本更新、状态诊断、编译产物清理。
 
 ```bash
 # 查看帮助
@@ -87,11 +87,15 @@ bash install.sh
 ./honeypot-ctl status      # 查看运行状态（PID / 内存 / API 健康 / 蜜罐服务状态）
 ./honeypot-ctl logs 50     # 查看最近 50 行日志
 
+# 编译管理
+./honeypot-ctl build       # 编译二进制（自动删除旧产物，覆盖写入 bin/honeypot）
+./honeypot-ctl clean       # 清理所有编译产物 + 部署包 + 前端构建 + Go 缓存
+
 # 一键版本更新
-./honeypot-ctl update      # git pull → 编译 → npm build → 重启
+./honeypot-ctl update      # git pull → clean → build → npm build → 重启
 ```
 
-**特性**：彩色输出、错误捕获与日志提示、`API_ADDR` 环境变量支持、PID 文件管理（`.honeypot.pid`）、bash 3.2+ 兼容。
+**特性**：彩色输出、编译覆盖规则（每次 build 自动 `rm -f` 旧二进制）、`clean` 命令清理全量编译产物和部署包临时文件、PID 文件管理（`.honeypot.pid`）、bash 3.2+ 兼容。
 
 ---
 
@@ -395,42 +399,46 @@ curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/traps/config
 
 ## Agent 部署
 
-在 Management Node 平台上一键生成 Agent 配置与部署命令，**陷阱场景选配集成在部署流程中**：
+在管理端 Web UI 上配置场景、目标系统和部署模式，一键生成 Agent 部署命令与部署包。
 
-### 部署方式
+### 部署方式 (v0.17.1 双模式)
 
-**方式一：前端手动部署**
+**方式一：一键拉取（推荐）**
 
-1. 打开管理面板 → "Agent部署" Tab
-2. 填写 / 自动检测管理端地址
-3. 选择陷阱场景（Web/数据库/主机/基础设施）— 9 服务网格实时预览
-4. 选择二进制获取方式（Release 预编译 / 源码编译 / 自定义 URL）
-5. 点击"生成 Agent 部署命令"
-6. 在 CLI / 部署脚本 / config.yaml 三 Tab 中复制对应命令
-7. 在目标主机上执行命令完成部署
+1. 打开管理面板 → "Agent部署" 标签
+2. 填写管理端地址、选择目标 OS（Linux / Windows）
+3. 选择陷阱场景（Web/数据库/主机/基础设施/全量/自定义）
+4. 选择"一键拉取"模式 → 点击"生成"
+5. 复制生成的"拉取命令"
+6. 在目标主机上粘贴执行 — 自动从管理端下载配置包 + 从 Release 拉取二进制 + 启动服务
 
-**方式二：命令行直接部署**
+**方式二：手动部署**
 
-生成的 CLI 命令示例（Web 场景）：
+1. 在 Agent部署 面板选择"手动部署"模式
+2. 点击"下载部署包"获取 ZIP（含 config.yaml + 部署脚本 + 部署指引）
+3. 在本机执行面板显示的交叉编译命令，编译目标平台二进制
+4. 将二进制 + ZIP 内容发送到目标主机
+5. 在目标主机上执行部署脚本
 
-```bash
-curl -sSL https://github.com/br0ny4/Laji-HoneyPot/releases/latest/download/honeypot-linux-amd64 \
-  -o honeypot && chmod +x honeypot && mkdir -p data && cat > config.yaml <<'HPEOF'
-# --- 自动生成的 Agent 配置（含 manager_addr 和 trap_scenario）---
-HPEOF
-./honeypot
+### Windows Agent 部署
+
+```powershell
+# 一键拉取（在 Win11 管理员 PowerShell 中执行）
+# 命令从 Web UI → Agent部署 → Windows + 一键拉取 获取
+
+# 或使用本地部署脚本
+.\deploy.ps1 -MgmtUrl "http://管理端IP:8080"
 ```
+
+详细的编译和部署指引见 `deploy/` 目录下的脚本：
+- `deploy/deploy-macos-mgr.sh` — macOS M1 Manager 完整部署
+- `deploy/build-win-agent.sh` — Win11 Agent 交叉编译
+- `deploy/one-click.sh` — 一键部署 + 全量测试
+- `deploy/quick-verify.sh` — 快速功能验证
 
 ### 注册校验
 
-Agent 部署后将在管理端"集群管理"面板自动上线，心跳周期 30 秒。可通过以下方式验证：
-
-```bash
-# 查看集群节点列表
-curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8443/api/cluster/nodes
-# 检查 Agent 日志
-tail -f data/honeypot.log | grep "registered"
-```
+Agent 部署后将在管理端"集群管理"面板自动上线，心跳周期 30 秒。
 
 ### 功能模块
 
@@ -441,34 +449,25 @@ tail -f data/honeypot.log | grep "registered"
 | 攻击事件 | 面包屑触发记录列表 | `/api/attacks` |
 | 指纹采集 | 浏览器指纹详情（Canvas/GPU/屏幕/时区） | `/api/fingerprints` |
 | 反制日志 | 反制部署记录 + 效果追踪 + 载荷详情 | `/api/countermeasures` |
-| 资产台账 | 攻击者 IP 汇总 + 端口扫描 + 服务清单（风险评级/Banner识别） | `/api/attackers` + `/api/assets/scan` |
-| 集群管理 | 分布式节点监控 + 在线状态 + Agent 部署指引 | `/api/cluster/nodes` |
-| **Agent 部署** | **一键生成 Agent 配置与部署命令 — 含陷阱场景选配预览** | `/api/cluster/agent/generate` |
-| 运维管理 | 系统状态 + 部署指南 + 性能指标 | `/api/system` + `/api/metrics` |
-| 攻击者画像 | 多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选 | `/api/profiles` + `/api/profiles/stats` |
-
-### 前端 API 认证修复
-
-生产模式下 Go 后端直接托管前端 SPA 时，`apiKeyMiddleware` 已豁免所有非 `/api/` 开头的路径（如 `/`、`/assets/`），确保浏览器首次加载 HTML/JS/CSS 时不会被 401 拦截。仅对 `/api/` 开头的管理 API 要求 `X-API-Key` 认证。
-
-### 运行时监控
-
-```bash
-curl -H "X-API-Key: hp-admin-2024" http://127.0.0.1:8080/api/metrics
-# {"uptime_seconds":3600,"goroutines":42,"memory":{"alloc_mb":12.5,...},"go_version":"go1.23.0","num_cpu":8}
-```
+| 集群管理 | 分布式节点监控 + 在线状态 + 部署指引(含 Agent部署跳转) | `/api/cluster/nodes` |
+| **Agent 部署** | **双模式 Agent 生成(一键拉取/手动部署) + 陷阱场景选配预览** | `/api/cluster/agent/generate` + `/api/cluster/agent/package` |
+| 蜜饵联动 | 蜜饵与蜜罐服务关联关系 + 触发追溯 + 联动统计 | `/api/bait/linkages` |
+| 攻击者画像 | 多维度画像 + 威胁标签 + TTPs图谱 + 智能筛选 | `/api/profile/attackers` |
 
 ### 页面底部状态栏
 
-前端内置调试状态栏，实时显示：
-- API 连接指示灯（绿/红）
-- SSE 实时推送指示灯（绿/红）
-- 可展开的最近 50 条请求日志（含 URL、状态码、耗时）
-- 最近错误高亮 + 排查提示
+前端内置调试状态栏，实时显示 API 连接指示灯（绿/红）、SSE 实时推送指示灯、可展开的最近 50 条请求日志。
 
 ---
 
 ## 测试验证
+
+### 全量自动化测试
+
+```bash
+# 运行全量功能测试 (48 项覆盖, 所有 API 端点 + 蜜饵联动 + Agent 部署)
+bash scripts/full-test.sh
+```
 
 ### 快速验证蜜罐是否正常工作
 
@@ -790,6 +789,8 @@ cd web && npm run lint            # ESLint 检查
 - [x] 跨平台 Agent 部署 — Linux/Windows 系统选型 + 专属 agent 生成逻辑 + PowerShell/sc.exe 服务注册（v0.17.0）
 - [x] 蜜饵联动引擎 — 8 种联动类型(SSH/MySQL/Redis/FTP/RDP/HTTP/LDAP/SMB) + 凭据哈希索引 + O(1) 触发匹配 + 全链路攻击追溯（v0.17.0）
   <!-- END-AUTO:ROADMAP -->
+- [x] Agent 部署双模式 — 一键拉取 + 手动部署 + 部署包 ZIP 下载端点（v0.17.1）
+- [x] ctl 综合优化 — honeypot-ctl 升级(build/clean 覆盖规则) + deploy 清理历史文件 + README 同步（v0.17.1）
 
 ---
 
