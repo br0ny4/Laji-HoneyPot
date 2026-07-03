@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 interface ScenarioInfo {
   key: string;
@@ -93,9 +94,7 @@ export default function AgentDeployPanel() {
       setManagerAddr(`${host}:8443`);
     }
     // 加载场景元数据
-    fetch('/api/traps/config', {
-      headers: { 'X-API-Key': localStorage.getItem('api_key') || 'hp-admin-2024' },
-    })
+    apiFetch('/api/traps/config')
       .then(r => r.json())
       .then(d => {
         if (d.scenarios) setScenarios(d.scenarios);
@@ -137,11 +136,10 @@ export default function AgentDeployPanel() {
     };
 
     try {
-      const resp = await fetch('/api/cluster/agent/generate', {
+      const resp = await apiFetch('/api/cluster/agent/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': localStorage.getItem('api_key') || 'hp-admin-2024',
         },
         body: JSON.stringify(req),
       });
