@@ -9,12 +9,13 @@ import OpsPanel from './components/OpsPanel';
 import AttackerProfilePanel from './components/AttackerProfilePanel';
 import ClusterPanel from './components/ClusterPanel';
 import AgentDeployPanel from './components/AgentDeployPanel';
+import BaitLinkagePanel from './components/BaitLinkagePanel';
 import StatusBar from './components/StatusBar';
 import LoginPage from './components/LoginPage';
 import { isLoggedIn, logout } from './api';
 import './App.css';
 
-type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles';
+type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages';
 
 interface TabDef {
   key: Tab;
@@ -33,6 +34,7 @@ const tabs: TabDef[] = [
   { key: 'agent', label: 'Agent部署', icon: '' },
   { key: 'ops', label: '运维管理', icon: '' },
   { key: 'profiles', label: '攻击者画像', icon: '' },
+  { key: 'linkages', label: '蜜饵联动', icon: '' },
 ];
 
 export default function App() {
@@ -101,6 +103,7 @@ export default function App() {
         {activeTab === 'agent' && <AgentDeployPanel />}
         {activeTab === 'ops' && <OpsPanel />}
         {activeTab === 'profiles' && <AttackerProfilePanel />}
+        {activeTab === 'linkages' && <BaitLinkagePanel />}
       </main>
 
       <StatusBar />

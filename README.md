@@ -9,8 +9,12 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
-  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-30%2F30%20PASS-brightgreen" alt="Tests" /></a>
-  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.16.0-blue" alt="Version" /></a>
+        <!-- BEGIN-AUTO:TESTS -->
+  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-29%2F29%20PASS-brightgreen" alt="Tests" /></a>
+  <!-- END-AUTO:TESTS -->
+        <!-- BEGIN-AUTO:VERSION -->
+  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.17.0-blue" alt="Version" /></a>
+  <!-- END-AUTO:VERSION -->
 </p>
 
 ---
@@ -782,6 +786,10 @@ cd web && npm run lint            # ESLint 检查
 - [x] MFA 二次认证 — TOTP + 挑战码 + 5 分钟临时令牌（v0.12.0）
 - [x] 不可篡改审计链 — SHA256 链式哈希 + 完整性自动校验（v0.12.0）
 - [x] 全链路 E2E 自动化测试 — 12 段测试覆盖全部 API（v0.12.0）
+  <!-- BEGIN-AUTO:ROADMAP -->
+- [x] 跨平台 Agent 部署 — Linux/Windows 系统选型 + 专属 agent 生成逻辑 + PowerShell/sc.exe 服务注册（v0.17.0）
+- [x] 蜜饵联动引擎 — 8 种联动类型(SSH/MySQL/Redis/FTP/RDP/HTTP/LDAP/SMB) + 凭据哈希索引 + O(1) 触发匹配 + 全链路攻击追溯（v0.17.0）
+  <!-- END-AUTO:ROADMAP -->
 
 ---
 

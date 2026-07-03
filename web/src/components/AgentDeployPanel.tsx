@@ -15,6 +15,7 @@ interface AgentDeployRequest {
   binary_source: string;
   custom_url: string;
   node_name: string;
+  os_target: string;  // "linux" or "windows"
 }
 
 interface AgentDeployArtifact {
@@ -26,6 +27,10 @@ interface AgentDeployArtifact {
   deploy_script: string;
   docker_command: string;
   verify_hint: string;
+  os_target: string;
+  install_script_ps: string;
+  service_config: string;
+  binary_name: string;
 }
 
 const SCENARIO_LABELS: Record<string, string> = {
@@ -69,6 +74,7 @@ export default function AgentDeployPanel() {
   const [binarySource, setBinarySource] = useState('release');
   const [customURL, setCustomURL] = useState('');
   const [nodeName, setNodeName] = useState('');
+  const [osTarget, setOsTarget] = useState<'linux' | 'windows'>('linux');
 
   // 结果状态
   const [artifact, setArtifact] = useState<AgentDeployArtifact | null>(null);
@@ -78,7 +84,7 @@ export default function AgentDeployPanel() {
 
   // 场景元数据
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
-  const [activeTab, setActiveTab] = useState<'config' | 'cli' | 'script'>('cli');
+  const [activeTab, setActiveTab] = useState<'config' | 'cli' | 'script' | 'ps' | 'service'>('cli');
 
   // 可用的所有服务
   const allServices = ['http', 'mysql', 'redis', 'ssh', 'ftp', 'ldap', 'dns', 'smb', 'rdp'];
@@ -133,6 +139,7 @@ export default function AgentDeployPanel() {
       binary_source: binarySource,
       custom_url: customURL.trim(),
       node_name: nodeName.trim(),
+      os_target: osTarget,
     };
 
     try {
@@ -196,6 +203,27 @@ export default function AgentDeployPanel() {
                 placeholder="web-node-01"
               />
             </div>
+          </div>
+
+          <div className="form-group">
+            <label>目标操作系统</label>
+            <div className="scenario-selector">
+              <button
+                className={`scenario-btn ${osTarget === 'linux' ? 'active' : ''}`}
+                onClick={() => setOsTarget('linux')}
+              >
+                Linux
+              </button>
+              <button
+                className={`scenario-btn ${osTarget === 'windows' ? 'active' : ''}`}
+                onClick={() => setOsTarget('windows')}
+              >
+                Windows
+              </button>
+            </div>
+            <span className="form-hint">
+              {osTarget === 'linux' ? '生成 bash/systemd 部署脚本' : '生成 PowerShell/Windows Service 部署脚本'}
+            </span>
           </div>
 
           <div className="form-group">
@@ -337,13 +365,24 @@ export default function AgentDeployPanel() {
                 className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`}
                 onClick={() => setActiveTab('script')}
               >
-                部署脚本 (bash)
+                {osTarget === 'linux' ? '部署脚本 (bash)' : '部署脚本'}
               </button>
               <button
                 className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`}
                 onClick={() => setActiveTab('config')}
               >
                 config.yaml
+              </button>
+              {osTarget === 'windows' && (
+                <button
+                  className={`tab-btn ${activeTab === 'ps' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('ps')}
+                >
+                  PowerShell
+                </button>
+              )}
+              <button className={`tab-btn ${activeTab === 'service' ? 'active' : ''}`} onClick={() => setActiveTab('service')}>
+                服务注册
               </button>
             </div>
 
@@ -373,6 +412,19 @@ export default function AgentDeployPanel() {
               </div>
             )}
 
+            {/* PowerShell 部署脚本 */}
+            {activeTab === 'ps' && osTarget === 'windows' && (
+              <div className="result-section">
+                <div className="result-header">
+                  <span className="result-label">Windows PowerShell 部署脚本：</span>
+                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.install_script_ps)}>
+                    复制脚本
+                  </button>
+                </div>
+                <pre className="code-block">{artifact.install_script_ps}</pre>
+              </div>
+            )}
+
             {/* config.yaml */}
             {activeTab === 'config' && (
               <div className="result-section">
@@ -383,6 +435,19 @@ export default function AgentDeployPanel() {
                   </button>
                 </div>
                 <pre className="code-block">{artifact.config_yaml}</pre>
+              </div>
+            )}
+
+            {/* 服务注册配置 */}
+            {activeTab === 'service' && (
+              <div className="result-section">
+                <div className="result-header">
+                  <span className="result-label">服务注册配置：</span>
+                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.service_config)}>
+                    复制配置
+                  </button>
+                </div>
+                <pre className="code-block">{artifact.service_config}</pre>
               </div>
             )}
 

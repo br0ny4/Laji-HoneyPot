@@ -654,6 +654,22 @@ func (e *Engine) GetTrapRegistry() *traps.Registry {
 	return e.trapRegistry
 }
 
+// GetServiceHosts 返回各蜜罐服务的可访问地址映射（用于蜜饵联动）
+// 返回 map[LinkageType]host:port，使用本地回环地址
+func (e *Engine) GetServiceHosts() map[string]string {
+	host := "127.0.0.1"
+	return map[string]string{
+		"ssh":   host + ":2222",
+		"mysql": host + ":3306",
+		"redis": host + ":6379",
+		"ftp":   host + ":2121",
+		"rdp":   host + ":33890",
+		"http":  host + ":8081",
+		"ldap":  host + ":3890",
+		"smb":   host + ":4450",
+	}
+}
+
 // parseCustomTemplates 从配置中解析自定义 HTTP 响应模板
 func parseCustomTemplates(cfg config.Section) []httpSvc.CustomTemplate {
 	raw, ok := cfg["custom_templates"]

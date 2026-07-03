@@ -49,6 +49,7 @@ type Server struct {
 	hpEngine        *honeypot.Engine     // 蜜罐引擎（服务状态查询）
 	baitGen         *bait.Generator      // 蜜标生成器
 	baitTracker     *bait.Tracker        // 蜜标访问追踪器
+	baitLinkage     *bait.LinkageEngine  // 蜜饵联动引擎
 	mux             *http.ServeMux
 	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
 	startTime       time.Time
@@ -139,6 +140,11 @@ func (s *Server) SetHoneypotEngine(engine *honeypot.Engine) {
 func (s *Server) SetBaitSystem(gen *bait.Generator, tracker *bait.Tracker) {
 	s.baitGen = gen
 	s.baitTracker = tracker
+}
+
+// SetBaitLinkage 注入蜜饵联动引擎（由 main 注入）
+func (s *Server) SetBaitLinkage(linkage *bait.LinkageEngine) {
+	s.baitLinkage = linkage
 }
 
 // SetProfileBuilder 设置攻击者画像构建器（由 main 注入）
@@ -248,6 +254,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/bait/tokens", s.handleBaitTokens)
 	s.mux.HandleFunc("/api/bait/access", s.handleBaitAccess)
 	s.mux.HandleFunc("/api/bait/stats", s.handleBaitStats)
+	// 蜜饵联动
+	s.mux.HandleFunc("/api/bait/linkages", s.handleBaitLinkages)
+	s.mux.HandleFunc("/api/bait/linkages/stats", s.handleBaitLinkageStats)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -1704,6 +1713,39 @@ func (s *Server) handleBaitStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats := s.baitTracker.Stats()
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// handleBaitLinkages 返回蜜饵联动列表
+// GET /api/bait/linkages?limit=100
+func (s *Server) handleBaitLinkages(w http.ResponseWriter, r *http.Request) {
+	if s.baitLinkage == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "linkage engine not initialized"})
+		return
+	}
+	linkages := s.baitLinkage.GetAll()
+	tokenID := r.URL.Query().Get("token_id")
+	if tokenID != "" {
+		linkages = s.baitLinkage.GetByTokenID(tokenID)
+	}
+	serviceType := r.URL.Query().Get("service_type")
+	if serviceType != "" {
+		linkages = s.baitLinkage.GetByServiceType(bait.LinkageType(serviceType))
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"linkages": linkages,
+		"total":    len(linkages),
+	})
+}
+
+// handleBaitLinkageStats 返回蜜饵联动统计
+// GET /api/bait/linkages/stats
+func (s *Server) handleBaitLinkageStats(w http.ResponseWriter, r *http.Request) {
+	if s.baitLinkage == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "linkage engine not initialized"})
+		return
+	}
+	stats := s.baitLinkage.Stats()
 	writeJSON(w, http.StatusOK, stats)
 }
 

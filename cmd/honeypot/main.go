@@ -87,6 +87,14 @@ func main() {
 	baitTracker := bait.NewTracker(10000)
 	logger.Info("bait tracker initialized")
 
+	// 蜜饵联动引擎：将蜜饵凭据与蜜罐服务建立关联，实现攻击链追溯
+	baitLinkage := bait.NewLinkageEngine()
+	svcHosts := hpEngine.GetServiceHosts()
+	for _, t := range baitTokens {
+		baitLinkage.RegisterFromToken(&t, svcHosts)
+	}
+	logger.Infow("bait linkages registered", "total", baitLinkage.Stats()["total"])
+
 	// 注入蜜标系统到 HTTP 蜜罐（所有 HTTP 响应自动包含蜜标链接）
 	hpEngine.SetBaitSystem(baitGen, baitTracker)
 
@@ -174,6 +182,7 @@ func main() {
 	apiSrv.SetTraceEngine(trEngine)            // 注入溯源反制引擎（深度反制 API）
 	apiSrv.SetHoneypotEngine(hpEngine)         // 注入蜜罐引擎（服务状态查询 API）
 	apiSrv.SetBaitSystem(baitGen, baitTracker) // 注入蜜标系统（诱饵管理 API）
+	apiSrv.SetBaitLinkage(baitLinkage)         // 注入蜜饵联动引擎
 
 	// 注入攻击者画像构建器
 	profileBuilder := profile.NewBuilder(st)

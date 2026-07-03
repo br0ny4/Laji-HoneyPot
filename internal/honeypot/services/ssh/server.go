@@ -7,14 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Laji-HoneyPot/honeypot/internal/bait"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/bus"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
 
 // Server SSH 蜜罐服务（模拟 OpenSSH 9.3）
 type Server struct {
-	logger *log.Logger
-	bus    *bus.Bus
+	logger      *log.Logger
+	bus         *bus.Bus
+	baitLinkage *bait.LinkageEngine
 }
 
 // New 创建 SSH 蜜罐
@@ -24,6 +26,13 @@ func New(logger *log.Logger) *Server {
 
 // SetBus 注入事件总线（由蜜罐引擎调用）
 func (s *Server) SetBus(b *bus.Bus) { s.bus = b }
+
+// SetBaitLinkage 注入蜜饵联动引擎（用于凭据验证与攻击链追溯）
+// 当 SSH 认证实现完善后，Handle 方法中应调用 s.baitLinkage.CheckCredential()
+// 以验证攻击者使用的用户名/密码是否来自蜜饵
+func (s *Server) SetBaitLinkage(linkage *bait.LinkageEngine) {
+	s.baitLinkage = linkage
+}
 
 // Handle 处理 SSH 连接
 // 模拟真实 OpenSSH 的多步交互行为：

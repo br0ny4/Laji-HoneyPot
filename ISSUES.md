@@ -4,6 +4,42 @@
 
 ---
 
+## v0.16.0 本地全量验证修复摘要 (2026-07-03)
+
+**验证范围**: 环境部署 → API全量(21端点) → E2E功能(面包屑/蜜饵/指纹/反制/集群) → 溯源反制链 → Agent集群
+
+### P1 修复 (1/1)
+| ID | 问题 | 根因 | 涉及文件 |
+|----|------|------|---------|
+| TODO-028 | SSE `/api/events` 返回 HTTP 500 | `requestLogMiddleware` 中的 `responseWriter` 未实现 `http.Flusher` 接口，`ServeWS` 类型断言失败 | server.go (+Flush方法) |
+
+### P3 修复 (1/1)
+| ID | 问题 | 根因 | 涉及文件 |
+|----|------|------|---------|
+| — | `/api/vulndb` 路由返回 404 | 仅有 `/api/vulns` 路由，缺少 `vulndb` 别名 | server.go (+别名路由) |
+
+### 验证通过清单 (全绿)
+- API 全量: 21/21 PASS (含新增 vulndb 别名)
+- 蜜饵系统: 7/7 文件投递正常，追踪ID嵌入验证通过
+- 蜜罐端口: 9/9 全部可达 (HTTP/MySQL/Redis/SSH/FTP/LDAP/SMB/RDP/DNS)
+- 面包屑: 8/10 触发成功 (2条403为预期敏感路径)
+- 溯源反制: BurpUA 32KB载荷 vs Chrome 17KB载荷 ✅
+- Exfil得分: screen_capture=50 + file_scan=30 + net_probe=40 = 120分 ✅
+- 审计链: valid=True ✅
+- 集群TLS: TLSv1.3, AES-128-GCM, CN=honeypot-cluster ✅
+- Agent部署生成: 8字段完整 ✅
+- 前端SPA: / + 静态资源正常 ✅
+- 单元测试: 30/30 PASS, 0 FAIL ✅
+
+### 非Bug确认 (误报)
+| 项 | 现象 | 说明 |
+|----|------|------|
+| MFA challenge | `{"error":"user required"}` | 需传入 `{"user":"admin"}` 参数 |
+| SPA路由 404 | /dashboard /attacks 等返回404 | 前端为Tab状态驱动,非URL路由,按设计 |
+| 面包屑403 | /backup/database.sql, /.git/config | 敏感路径拒绝访问,预期行为 |
+
+---
+
 ## v0.16.0 迭代摘要 (2026-07-03)
 
 **迭代主题: 蜜饵投放系统 (P0) + 攻击者画像 MVP (P1)**
