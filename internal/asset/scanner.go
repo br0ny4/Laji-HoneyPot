@@ -168,21 +168,21 @@ func (s *Scanner) scanPort(target ScanTarget) ServiceInfo {
 	}
 
 	// Banner 抓取：发送探测包并读取响应
-	info.Banner = s.grabBanner(conn, target.Port)
+	info.Banner = s.grabBanner(conn, target)
 
 	return info
 }
 
 // grabBanner 尝试抓取服务 Banner
-func (s *Scanner) grabBanner(conn net.Conn, port int) string {
+func (s *Scanner) grabBanner(conn net.Conn, target ScanTarget) string {
 	// 设置读写超时
 	conn.SetDeadline(time.Now().Add(s.timeout))
 
 	// 根据端口发送不同的探测请求
-	switch port {
+	switch target.Port {
 	case 80, 8080, 8000, 8081, 8888, 3000, 5000, 9000:
 		// HTTP 请求
-		fmt.Fprintf(conn, "HEAD / HTTP/1.0\r\nHost: %s\r\n\r\n", conn.RemoteAddr().String())
+		fmt.Fprintf(conn, "HEAD / HTTP/1.0\r\nHost: %s\r\n\r\n", target.Host)
 	case 443, 8443:
 		// HTTPS — 仅检查连接，不进行 TLS 握手
 		return "TLS/SSL"

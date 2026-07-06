@@ -198,6 +198,11 @@ func main() {
 	clusterGen := cluster.NewGenerator(version)
 	apiSrv.SetClusterGenerator(clusterGen) // Generator 始终可用（前端需 manager mode 才可部署）
 
+	// v0.17.2: Agent 编译引擎 — 在管理端交叉编译独立可执行文件
+	clusterCompiler := cluster.NewCompiler(".")
+	apiSrv.SetClusterCompiler(clusterCompiler)
+	logger.Info("agent compiler initialized")
+
 	if cfg.Cluster.Enabled && cfg.Cluster.Role == "manager" {
 		tlsCfg, tlsErr := buildClusterTLS(cfg.Cluster, logger)
 		if tlsErr != nil {

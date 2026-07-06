@@ -58,6 +58,10 @@ plugins:
         trap_scenario: full
     ops-engine:
         enabled: true
+        github_token: ""
+        github_owner: br0ny4
+        github_repo: Laji-HoneyPot
+        github_branch: master
     traceability-engine:
         enabled: true
         update_interval: 24h

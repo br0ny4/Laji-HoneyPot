@@ -2,6 +2,7 @@ package countermeasure
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 )
@@ -94,5 +95,5 @@ window._laji_compliance_note=true;
 }
 
 func randomID() int64 {
-	return 0 // placeholder
+	return time.Now().UnixNano()%900000 + 100000
 }

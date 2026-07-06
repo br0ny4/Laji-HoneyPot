@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { apiFetch } from '../api';
+import { SCENARIO_LABELS, SERVICE_LABELS, SERVICE_DESC } from '../constants';
 
 interface ScenarioInfo {
   key: string;
@@ -7,117 +8,103 @@ interface ScenarioInfo {
   services: string[];
 }
 
-interface AgentDeployRequest {
-  manager_addr: string;
-  scenario: string;
-  custom_services: string[];
-  tls_insecure: boolean;
-  binary_source: string;
-  custom_url: string;
-  node_name: string;
-  os_target: string;  // "linux" or "windows"
-}
-
-interface AgentDeployArtifact {
-  manager_addr: string;
-  scenario: string;
-  enabled_svcs: string[];
-  config_yaml: string;
-  cli_command: string;
-  deploy_script: string;
-  docker_command: string;
-  verify_hint: string;
+interface CompileResult {
+  job_id: string;
+  status: string; // "compiling" | "complete" | "failed"
+  progress: number; // 0-100
+  error?: string;
   os_target: string;
-  install_script_ps: string;
-  service_config: string;
+  goarch: string;
   binary_name: string;
-  // v0.17.1: 双模式部署
-  pull_command: string;
-  manual_guide: string;
-  package_url: string;
-  file_list: { name: string; description: string }[];
-  build_command: string;
+  binary_size: number;
+  package_size: number;
+  package_name: string;
+  files: CompileFile[];
+  commands: DeployCommand[];
+  duration_sec: number;
+  started_at: string;
+  finished_at?: string;
 }
 
-type DeployMode = 'manual' | 'pull';
+interface CompileFile {
+  name: string;
+  description: string;
+  size: number;
+}
 
-const SCENARIO_LABELS: Record<string, string> = {
-  web: 'Web 业务',
-  database: '数据库',
-  remote_access: '远程访问',
-  infrastructure: '基础设施',
-  full: '全量部署',
-  custom: '自定义',
+interface DeployCommand {
+  step: number;
+  title: string;
+  command: string;
+  description?: string;
+}
+
+const ARCH_LABELS: Record<string, string> = {
+  amd64: 'x86_64 / AMD64',
+  arm64: 'ARM64 / aarch64',
 };
 
-const SOURCE_LABELS: Record<string, string> = {
-  release: 'Release 预编译 (推荐)',
-  build: '源码编译 (go build)',
-  url: '自定义下载 URL',
-};
+function formatSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
 
-const SERVICE_LABELS: Record<string, string> = {
-  http: 'HTTP', mysql: 'MySQL', redis: 'Redis', ssh: 'SSH',
-  ftp: 'FTP', ldap: 'LDAP', dns: 'DNS', smb: 'SMB', rdp: 'RDP',
-};
-
-const SERVICE_DESC: Record<string, string> = {
-  http: 'Web 蜜罐 — 面包屑引流、浏览器指纹采集、反制载荷注入',
-  mysql: 'MySQL 蜜罐 — 模拟数据库服务、捕获 SQL 注入/暴力破解',
-  redis: 'Redis 蜜罐 — 模拟缓存服务、捕获未授权访问',
-  ssh: 'SSH 蜜罐 — 模拟远程登录服务、捕获暴力破解/密钥窃取',
-  ftp: 'FTP 蜜罐 — 模拟文件传输服务、捕获匿名登录/文件窃取',
-  ldap: 'LDAP 蜜罐 — 模拟目录服务、捕获信息泄露探测',
-  dns: 'DNS 蜜罐 — 模拟域名服务、捕获 DNS 隧道/劫持',
-  smb: 'SMB 蜜罐 — 模拟文件共享服务、捕获横向移动',
-  rdp: 'RDP 蜜罐 — 模拟远程桌面服务、捕获远程登录攻击',
-};
+function formatDuration(sec: number): string {
+  if (sec < 1) return '< 1s';
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}m ${s}s`;
+}
 
 export default function AgentDeployPanel() {
   // 表单状态
   const [managerAddr, setManagerAddr] = useState('10.0.0.1:8443');
+  const [nodeName, setNodeName] = useState('');
+  const [osTarget, setOsTarget] = useState<'linux' | 'windows'>('linux');
+  const [goarch, setGoarch] = useState<'amd64' | 'arm64'>('amd64');
   const [scenario, setScenario] = useState('web');
   const [customServices, setCustomServices] = useState<string[]>([]);
   const [tlsInsecure, setTlsInsecure] = useState(false);
-  const [binarySource, setBinarySource] = useState('release');
-  const [customURL, setCustomURL] = useState('');
-  const [nodeName, setNodeName] = useState('');
-  const [osTarget, setOsTarget] = useState<'linux' | 'windows'>('linux');
-  const [deployMode, setDeployMode] = useState<DeployMode>('pull');  // v0.17.1: 部署模式
 
-  // 结果状态
-  const [artifact, setArtifact] = useState<AgentDeployArtifact | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  // 编译状态
+  const [compileResult, setCompileResult] = useState<CompileResult | null>(null);
+  const [compiling, setCompiling] = useState(false);
+  const [compileError, setCompileError] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 场景元数据
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
-  const [activeTab, setActiveTab] = useState<'config' | 'cli' | 'script' | 'ps' | 'service' | 'pull' | 'manual' | 'build'>('cli');
 
   // 可用的所有服务
   const allServices = ['http', 'mysql', 'redis', 'ssh', 'ftp', 'ldap', 'dns', 'smb', 'rdp'];
-  const SERVICE_LABELS_MAP: Record<string, string> = {
-    http: 'HTTP', mysql: 'MySQL', redis: 'Redis', ssh: 'SSH',
-    ftp: 'FTP', ldap: 'LDAP', dns: 'DNS', smb: 'SMB', rdp: 'RDP',
-  };
 
-  // 自动检测管理端地址 (从 URL 推断)
   useEffect(() => {
     const host = window.location.hostname;
     if (host && host !== 'localhost' && host !== '127.0.0.1') {
       setManagerAddr(`${host}:8443`);
     }
-    // 加载场景元数据
     apiFetch('/api/traps/config')
       .then(r => r.json())
-      .then(d => {
-        if (d.scenarios) setScenarios(d.scenarios);
-      })
+      .then(d => { if (d.scenarios) setScenarios(d.scenarios); })
       .catch(() => {});
   }, []);
 
-  // 根据场景获取预览服务列表
+  // 清理轮询
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const toast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 2000);
+  }, []);
+
   const getPreviewServices = (): string[] => {
     const found = scenarios.find(s => s.key === scenario);
     return found?.services || [];
@@ -129,34 +116,38 @@ export default function AgentDeployPanel() {
     );
   };
 
-  const handleGenerate = async () => {
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const handleCompile = async () => {
     if (!managerAddr.trim()) {
-      setError('请输入管理端地址');
+      setCompileError('请输入管理端地址');
       return;
     }
 
-    setLoading(true);
-    setError('');
-    setArtifact(null);
-    setSuccess('');
+    setCompiling(true);
+    setCompileError('');
+    setCompileResult(null);
+    stopPolling();
 
-    const req: AgentDeployRequest = {
+    const req = {
       manager_addr: managerAddr.trim(),
       scenario,
       custom_services: scenario === 'custom' ? customServices : [],
       tls_insecure: tlsInsecure,
-      binary_source: binarySource,
-      custom_url: customURL.trim(),
       node_name: nodeName.trim(),
       os_target: osTarget,
+      goarch,
     };
 
     try {
-      const resp = await apiFetch('/api/cluster/agent/generate', {
+      const resp = await apiFetch('/api/cluster/agent/compile', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(req),
       });
 
@@ -165,34 +156,68 @@ export default function AgentDeployPanel() {
         throw new Error(err.error || `HTTP ${resp.status}`);
       }
 
-      const data: AgentDeployArtifact = await resp.json();
-      setArtifact(data);
-      setSuccess(`Agent 配置已生成 — 启用 ${data.enabled_svcs.length} 个服务: ${data.enabled_svcs.map(s => SERVICE_LABELS_MAP[s] || s).join(', ')}`);
+      const initial: CompileResult = await resp.json();
+      setCompileResult(initial);
+
+      // 开始轮询编译进度
+      pollRef.current = setInterval(async () => {
+        try {
+          const statusResp = await apiFetch(
+            `/api/cluster/agent/compile/status?job_id=${initial.job_id}`
+          );
+          if (!statusResp.ok) return;
+          const data: CompileResult = await statusResp.json();
+          setCompileResult(data);
+
+          if (data.status === 'complete' || data.status === 'failed') {
+            stopPolling();
+            setCompiling(false);
+            if (data.status === 'failed') {
+              setCompileError(data.error || '编译失败');
+            }
+          }
+        } catch {
+          // 网络错误时继续重试
+        }
+      }, 1000);
+
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
+      setCompileError((e as Error).message);
+      setCompiling(false);
     }
   };
 
+  const handleDownload = () => {
+    if (!compileResult || compileResult.status !== 'complete') return;
+    const url = `/api/cluster/agent/compile/download?job_id=${compileResult.job_id}`;
+    window.open(url, '_blank');
+  };
+
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setSuccess('已复制到剪贴板');
-      setTimeout(() => setSuccess(''), 2000);
-    });
+    navigator.clipboard.writeText(text).then(() => toast('已复制到剪贴板'));
+  };
+
+  const copyAllCommands = () => {
+    if (!compileResult) return;
+    const all = compileResult.commands
+      .map(c => `# 步骤 ${c.step}: ${c.title}\n${c.command}`)
+      .join('\n\n');
+    navigator.clipboard.writeText(all).then(() => toast('全部命令已复制'));
   };
 
   return (
     <div className="panel">
       <div className="panel-header">
         <h2>Agent 部署</h2>
-        <span className="panel-subtitle">在 Management Node 平台生成 Agent 配置与部署命令，一键部署至目标主机</span>
+        <span className="panel-subtitle">
+          在管理端交叉编译生成目标平台的独立可执行文件，无需目标机器预装任何运行环境
+        </span>
       </div>
 
       <div className="panel-body">
-        {/* 配置表单 */}
+        {/* ========== 配置表单 ========== */}
         <div className="deploy-form">
-          <div className="form-row">
+          <div className="form-row" style={{ marginBottom: 16 }}>
             <div className="form-group">
               <label>管理端地址</label>
               <input
@@ -201,7 +226,7 @@ export default function AgentDeployPanel() {
                 onChange={e => setManagerAddr(e.target.value)}
                 placeholder="10.0.0.1:8443"
               />
-              <span className="form-hint">Agent 连接的管理节点 TLS 地址（自动填写当前节点 IP）</span>
+              <span className="form-hint">Agent 连接的管理节点 TLS 地址</span>
             </div>
             <div className="form-group">
               <label>节点名称（可选）</label>
@@ -214,50 +239,36 @@ export default function AgentDeployPanel() {
             </div>
           </div>
 
-          <div className="form-group">
-            <label>部署模式</label>
-            <div className="scenario-selector">
-              <button
-                className={`scenario-btn ${deployMode === 'pull' ? 'active' : ''}`}
-                onClick={() => setDeployMode('pull')}
-              >
-                一键拉取
-              </button>
-              <button
-                className={`scenario-btn ${deployMode === 'manual' ? 'active' : ''}`}
-                onClick={() => setDeployMode('manual')}
-              >
-                手动部署
-              </button>
+          {/* 目标平台选择 */}
+          <div className="form-row" style={{ marginBottom: 16 }}>
+            <div className="form-group">
+              <label>目标操作系统</label>
+              <div className="scenario-selector">
+                <button
+                  className={`scenario-btn ${osTarget === 'linux' ? 'active' : ''}`}
+                  onClick={() => setOsTarget('linux')}
+                >Linux</button>
+                <button
+                  className={`scenario-btn ${osTarget === 'windows' ? 'active' : ''}`}
+                  onClick={() => setOsTarget('windows')}
+                >Windows</button>
+              </div>
             </div>
-            <span className="form-hint">
-              {deployMode === 'pull'
-                ? '目标主机执行命令从管理端拉取所有文件并自动启动'
-                : '本地编译二进制后手动发送到目标主机，通过脚本启动'}
-            </span>
+            <div className="form-group">
+              <label>CPU 架构</label>
+              <div className="scenario-selector">
+                {(['amd64', 'arm64'] as const).map(a => (
+                  <button
+                    key={a}
+                    className={`scenario-btn ${goarch === a ? 'active' : ''}`}
+                    onClick={() => setGoarch(a)}
+                  >{ARCH_LABELS[a]}</button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="form-group">
-            <label>目标操作系统</label>
-            <div className="scenario-selector">
-              <button
-                className={`scenario-btn ${osTarget === 'linux' ? 'active' : ''}`}
-                onClick={() => setOsTarget('linux')}
-              >
-                Linux
-              </button>
-              <button
-                className={`scenario-btn ${osTarget === 'windows' ? 'active' : ''}`}
-                onClick={() => setOsTarget('windows')}
-              >
-                Windows
-              </button>
-            </div>
-            <span className="form-hint">
-              {osTarget === 'linux' ? '生成 bash/systemd 部署脚本' : '生成 PowerShell/Windows Service 部署脚本'}
-            </span>
-          </div>
-
+          {/* 陷阱场景 */}
           <div className="form-group">
             <label>陷阱场景选配</label>
             <div className="scenario-selector">
@@ -266,19 +277,16 @@ export default function AgentDeployPanel() {
                   key={s}
                   className={`scenario-btn ${scenario === s ? 'active' : ''}`}
                   onClick={() => setScenario(s)}
-                >
-                  {SCENARIO_LABELS[s] || s}
-                </button>
+                >{SCENARIO_LABELS[s] || s}</button>
               ))}
             </div>
             <span className="form-hint">
               {scenario !== 'custom'
-                ? `将启用以下服务: ${getPreviewServices().map(s => SERVICE_LABELS_MAP[s] || s).join(', ') || '（无）'}`
+                ? `启用服务: ${getPreviewServices().join(', ') || '（无）'}`
                 : '请在下方勾选需要启用的服务'}
             </span>
           </div>
 
-          {/* 自定义服务选择 (仅 custom 场景) */}
           {scenario === 'custom' && (
             <div className="form-group">
               <label>自定义服务</label>
@@ -290,14 +298,14 @@ export default function AgentDeployPanel() {
                       checked={customServices.includes(svc)}
                       onChange={() => toggleCustomService(svc)}
                     />
-                    {SERVICE_LABELS_MAP[svc] || svc}
+                    {SERVICE_LABELS[svc] || svc}
                   </label>
                 ))}
               </div>
             </div>
           )}
 
-          {/* 配置预览 */}
+          {/* 服务预览 */}
           {scenarios.length > 0 && (
             <div className="config-preview">
               <h4 className="preview-title">
@@ -322,33 +330,8 @@ export default function AgentDeployPanel() {
                   );
                 })}
               </div>
-              <div className="preview-note">
-                以上为陷阱部署预览。未启用服务不会监听端口，不产生资源占用。点击"生成 Agent 部署命令"后，选配将被写入 Agent 的 config.yaml。
-              </div>
             </div>
           )}
-
-          <div className="form-row">
-            <div className="form-group">
-              <label>二进制获取方式</label>
-              <select value={binarySource} onChange={e => setBinarySource(e.target.value)}>
-                {Object.entries(SOURCE_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-            {binarySource === 'url' && (
-              <div className="form-group">
-                <label>自定义下载 URL</label>
-                <input
-                  type="text"
-                  value={customURL}
-                  onChange={e => setCustomURL(e.target.value)}
-                  placeholder="https://cdn.example.com/honeypot"
-                />
-              </div>
-            )}
-          </div>
 
           <div className="form-group">
             <label className="checkbox-label">
@@ -361,236 +344,158 @@ export default function AgentDeployPanel() {
             </label>
           </div>
 
+          {/* 零依赖提示 */}
+          <div className="compile-hint">
+            <strong>零依赖部署</strong> — 管理端将交叉编译生成静态链接的独立可执行文件
+            (CGO_ENABLED=0)，目标机器仅需基础操作系统（bash/systemd 或 PowerShell），
+            无需安装 Go、Runtime 或任何外部依赖。
+          </div>
+
           <button
             className="btn btn-primary btn-generate"
-            onClick={handleGenerate}
-            disabled={loading}
+            onClick={handleCompile}
+            disabled={compiling}
           >
-            {loading ? '生成中...' : '生成 Agent 部署命令'}
+            {compiling ? '编译中...' : '编译并生成部署包'}
           </button>
         </div>
 
-        {/* 错误提示 */}
-        {error && (
-          <div className="alert alert-error">{error}</div>
+        {/* ========== 错误提示 ========== */}
+        {compileError && (
+          <div className="alert alert-error">{compileError}</div>
         )}
 
-        {/* 成功提示 */}
-        {success && (
-          <div className="alert alert-success">{success}</div>
+        {/* ========== Toast ========== */}
+        {toastMsg && (
+          <div className="toast-notification toast-visible">{toastMsg}</div>
         )}
 
-        {/* 生成结果 */}
-        {artifact && (
-          <div className="deploy-result">
-            <h3>部署产出物</h3>
+        {/* ========== 编译进度 ========== */}
+        {compiling && compileResult && (
+          <div className="compile-progress-panel">
+            <h3>编译进度</h3>
+            <div className="progress-bar-wrap">
+              <div
+                className="progress-bar-fill"
+                style={{ width: `${compileResult.progress}%` }}
+              />
+            </div>
+            <div className="progress-info">
+              <span className="progress-text">
+                {compileResult.progress < 40 && '正在编译 Agent 可执行文件...'}
+                {compileResult.progress >= 40 && compileResult.progress < 65 && '正在生成配置文件...'}
+                {compileResult.progress >= 65 && compileResult.progress < 90 && '正在生成部署脚本与打包...'}
+                {compileResult.progress >= 90 && compileResult.progress < 100 && '正在生成部署命令...'}
+                {compileResult.progress >= 100 && '编译完成!'}
+              </span>
+              <span className="progress-pct">{compileResult.progress}%</span>
+            </div>
+            <div className="progress-meta">
+              目标: {compileResult.os_target}/{compileResult.goarch} | 任务: {compileResult.job_id}
+            </div>
+          </div>
+        )}
 
-            {/* 部署模式切换 */}
-            <div className="form-group" style={{marginBottom: '1rem'}}>
-              <label>部署模式</label>
-              <div className="scenario-selector">
-                <button
-                  className={`scenario-btn ${deployMode === 'pull' ? 'active' : ''}`}
-                  onClick={() => { setDeployMode('pull'); setActiveTab('pull'); }}
-                >
-                  一键拉取
-                </button>
-                <button
-                  className={`scenario-btn ${deployMode === 'manual' ? 'active' : ''}`}
-                  onClick={() => { setDeployMode('manual'); setActiveTab('manual'); }}
-                >
-                  手动部署
-                </button>
+        {/* ========== 编译结果 ========== */}
+        {compileResult && compileResult.status === 'complete' && (
+          <div className="compile-result-panel">
+            {/* 概览卡片 */}
+            <div className="result-overview">
+              <div className="overview-card">
+                <span className="overview-label">编译耗时</span>
+                <span className="overview-value">{formatDuration(compileResult.duration_sec)}</span>
+              </div>
+              <div className="overview-card">
+                <span className="overview-label">二进制大小</span>
+                <span className="overview-value">{formatSize(compileResult.binary_size)}</span>
+              </div>
+              <div className="overview-card">
+                <span className="overview-label">部署包大小</span>
+                <span className="overview-value">{formatSize(compileResult.package_size)}</span>
+              </div>
+              <div className="overview-card">
+                <span className="overview-label">目标平台</span>
+                <span className="overview-value">{compileResult.os_target}/{compileResult.goarch}</span>
               </div>
             </div>
 
-            {/* Tab 切换 */}
-            <div className="result-tabs">
-              {deployMode === 'pull' ? (
-                <>
-                  <button className={`tab-btn ${activeTab === 'pull' ? 'active' : ''}`} onClick={() => setActiveTab('pull')}>
-                    拉取命令
-                  </button>
-                  <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>
-                    config.yaml
-                  </button>
-                  <button className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`} onClick={() => setActiveTab('script')}>
-                    部署脚本
-                  </button>
-                  {osTarget === 'windows' && (
-                    <button className={`tab-btn ${activeTab === 'ps' ? 'active' : ''}`} onClick={() => setActiveTab('ps')}>
-                      PowerShell
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <button className={`tab-btn ${activeTab === 'manual' ? 'active' : ''}`} onClick={() => setActiveTab('manual')}>
-                    部署指引
-                  </button>
-                  <button className={`tab-btn ${activeTab === 'build' ? 'active' : ''}`} onClick={() => setActiveTab('build')}>
-                    编译命令
-                  </button>
-                  <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>
-                    config.yaml
-                  </button>
-                  <button className={`tab-btn ${activeTab === 'script' ? 'active' : ''}`} onClick={() => setActiveTab('script')}>
-                    部署脚本
-                  </button>
-                </>
+            {/* 产物文件列表 */}
+            <div className="result-section-card">
+              <div className="section-card-header">
+                <h4>生成文件</h4>
+                <button className="btn btn-sm btn-primary" onClick={handleDownload}>
+                  下载部署包 ({compileResult.package_name})
+                </button>
+              </div>
+              <div className="file-list">
+                {compileResult.files.map((f, i) => (
+                  <div key={i} className="file-item">
+                    <div className="file-icon">
+                      {f.name.endsWith('.exe') || f.name === 'honeypot-agent' ? '⚙' :
+                       f.name.endsWith('.yaml') ? '📋' :
+                       f.name.endsWith('.sh') || f.name.endsWith('.ps1') ? '📜' :
+                       f.name.endsWith('.pem') ? '🔑' : '📄'}
+                    </div>
+                    <div className="file-info">
+                      <span className="file-name">{f.name}</span>
+                      <span className="file-desc">{f.description}</span>
+                    </div>
+                    <span className="file-size">{formatSize(f.size)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 部署命令 */}
+            <div className="result-section-card">
+              <div className="section-card-header">
+                <h4>部署命令（目标机器无依赖执行）</h4>
+                <button className="btn btn-sm" onClick={copyAllCommands}>一键复制全部</button>
+              </div>
+              <div className="deploy-cmd-list">
+                {compileResult.commands.map((cmd) => (
+                  <div key={cmd.step} className="deploy-cmd-item">
+                    <div className="cmd-header">
+                      <span className="cmd-step">步骤 {cmd.step}</span>
+                      <span className="cmd-title">{cmd.title}</span>
+                      <button
+                        className="btn btn-xs"
+                        onClick={() => copyToClipboard(cmd.command)}
+                      >复制</button>
+                    </div>
+                    <pre className="code-block cmd-block">{cmd.command}</pre>
+                    {cmd.description && (
+                      <p className="cmd-desc">{cmd.description}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 零依赖说明 */}
+            <div className="zero-dep-hint">
+              <strong>目标机器运行要求:</strong> 无需安装任何额外软件。
+              {compileResult.os_target === 'linux' && (
+                <span> 仅需 bash + systemd（所有主流 Linux 发行版均内置）。</span>
               )}
-              <button className={`tab-btn ${activeTab === 'cli' ? 'active' : ''}`} onClick={() => setActiveTab('cli')}>
-                CLI 命令
-              </button>
-              <button className={`tab-btn ${activeTab === 'service' ? 'active' : ''}`} onClick={() => setActiveTab('service')}>
-                文件清单
-              </button>
+              {compileResult.os_target === 'windows' && (
+                <span> 仅需 PowerShell 5.1+（Windows 10+/Server 2016+ 均内置）。</span>
+              )}
+              部署包内的所有文件均为自包含格式，直接复制到目标机器执行部署脚本即可完成安装。
             </div>
-
-            {/* 一键拉取命令 */}
-            {activeTab === 'pull' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">
-                    在目标主机上执行以下命令即可自动拉取部署：
-                  </span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.pull_command)}>
-                    复制命令
-                  </button>
-                </div>
-                <pre className="code-block cmd-block">{artifact.pull_command}</pre>
-                <div className="verify-section" style={{marginTop: '1rem'}}>
-                  <p style={{color: '#666', fontSize: '0.85rem', marginBottom: '0.5rem'}}>
-                    此命令会自动从管理端下载配置文件和部署脚本，从 GitHub Releases 拉取预编译二进制，完成部署后自动注册并启动服务。
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* 手动部署指引 */}
-            {activeTab === 'manual' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">手动部署完整指引：</span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.manual_guide)}>
-                    复制指引
-                  </button>
-                </div>
-                <pre className="code-block">{artifact.manual_guide}</pre>
-              </div>
-            )}
-
-            {/* 编译命令 */}
-            {activeTab === 'build' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">本地交叉编译命令 (macOS/Linux 上执行)：</span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.build_command)}>
-                    复制命令
-                  </button>
-                </div>
-                <pre className="code-block cmd-block">{artifact.build_command}</pre>
-                <div className="verify-section" style={{marginTop: '1rem'}}>
-                  <p style={{color: '#666', fontSize: '0.85rem', marginBottom: '0.5rem'}}>
-                    编译完成后将生成 {artifact.binary_name}（约14MB），将其与部署脚本和配置文件一同发送到目标主机，然后执行部署脚本即可。
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* CLI 命令 (保留兼容两种模式) */}
-            {activeTab === 'cli' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">快速一键命令（从 Release 下载 + 配置 + 启动）：</span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.cli_command)}>
-                    复制命令
-                  </button>
-                </div>
-                <pre className="code-block cmd-block">{artifact.cli_command}</pre>
-              </div>
-            )}
-
-            {/* 部署脚本 */}
-            {activeTab === 'script' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">
-                    {osTarget === 'linux' ? 'Bash 自动部署脚本（含 systemd 服务注册）：' : '部署脚本：'}
-                  </span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.deploy_script)}>
-                    复制脚本
-                  </button>
-                </div>
-                <pre className="code-block">{artifact.deploy_script}</pre>
-              </div>
-            )}
-
-            {/* PowerShell 部署脚本 */}
-            {activeTab === 'ps' && osTarget === 'windows' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">Windows PowerShell 部署脚本：</span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.install_script_ps)}>
-                    复制脚本
-                  </button>
-                </div>
-                <pre className="code-block">{artifact.install_script_ps}</pre>
-              </div>
-            )}
-
-            {/* config.yaml */}
-            {activeTab === 'config' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">Agent 配置文件：</span>
-                  <button className="btn btn-sm" onClick={() => copyToClipboard(artifact.config_yaml)}>
-                    复制配置
-                  </button>
-                </div>
-                <pre className="code-block">{artifact.config_yaml}</pre>
-              </div>
-            )}
-
-            {/* 文件清单 */}
-            {activeTab === 'service' && (
-              <div className="result-section">
-                <div className="result-header">
-                  <span className="result-label">部署包文件清单：</span>
-                  <button
-                    className="btn btn-sm btn-primary"
-                    onClick={() => {
-                      const baseUrl = window.location.origin;
-                      const url = `${baseUrl}${artifact.package_url}`;
-                      window.open(url, '_blank');
-                    }}
-                  >
-                    下载部署包 (ZIP)
-                  </button>
-                </div>
-                <table className="file-list-table" style={{width: '100%', borderCollapse: 'collapse', marginTop: '0.5rem'}}>
-                  <thead>
-                    <tr style={{background: '#f5f5f5', textAlign: 'left'}}>
-                      <th style={{padding: '8px 12px', borderBottom: '2px solid #ddd'}}>文件名</th>
-                      <th style={{padding: '8px 12px', borderBottom: '2px solid #ddd'}}>说明</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {artifact.file_list.map((f, i) => (
-                      <tr key={i} style={{borderBottom: '1px solid #eee'}}>
-                        <td style={{padding: '8px 12px', fontFamily: 'monospace', fontWeight: 600}}>{f.name}</td>
-                        <td style={{padding: '8px 12px', color: '#666', fontSize: '0.9rem'}}>{f.description}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
 
             {/* 验证提示 */}
             <div className="verify-section">
-              <h4>注册校验</h4>
-              <pre className="code-block">{artifact.verify_hint}</pre>
+              <h4>部署后验证</h4>
+              <pre className="code-block">{compileResult.os_target === 'windows' ? `# Windows 验证命令
+sc.exe query HoneypotAgent
+Get-Content "C:\\Program Files\\Honeypot\\data\\agent.log" -Tail 20` : `# Linux 验证命令
+systemctl status honeypot-agent
+journalctl -u honeypot-agent -f
+curl http://<agent-ip>:8080/healthz`}</pre>
+              <p style={{ color: '#64748b', fontSize: '12px', marginTop: 8 }}>
+                确认 Agent 上线后，在"集群管理"面板查看节点状态。
+              </p>
             </div>
           </div>
         )}

@@ -112,8 +112,9 @@ func TestFramerReadWrite_Heartbeat(t *testing.T) {
 // TestNodeRegistry_Register 验证节点注册
 func TestNodeRegistry_Register(t *testing.T) {
 	reg := &nodeRegistry{
-		nodes: make(map[string]*NodeState),
-		info:  make(map[string]*NodeInfo),
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
 	}
 
 	info := &NodeInfo{
@@ -149,8 +150,9 @@ func TestNodeRegistry_Register(t *testing.T) {
 // TestNodeRegistry_Heartbeat 验证心跳更新
 func TestNodeRegistry_Heartbeat(t *testing.T) {
 	reg := &nodeRegistry{
-		nodes: make(map[string]*NodeState),
-		info:  make(map[string]*NodeInfo),
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
 	}
 
 	reg.register(&NodeInfo{NodeID: "node-2"}, "")
@@ -180,8 +182,9 @@ func TestNodeRegistry_Heartbeat(t *testing.T) {
 // TestNodeRegistry_MarkOffline 验证离线标记
 func TestNodeRegistry_MarkOffline(t *testing.T) {
 	reg := &nodeRegistry{
-		nodes: make(map[string]*NodeState),
-		info:  make(map[string]*NodeInfo),
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
 	}
 
 	reg.register(&NodeInfo{NodeID: "node-3"}, "")
@@ -196,8 +199,9 @@ func TestNodeRegistry_MarkOffline(t *testing.T) {
 // TestNodeRegistry_AllStates_Timeout 验证超时自动离线
 func TestNodeRegistry_AllStates_Timeout(t *testing.T) {
 	reg := &nodeRegistry{
-		nodes: make(map[string]*NodeState),
-		info:  make(map[string]*NodeInfo),
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
 	}
 
 	reg.register(&NodeInfo{NodeID: "node-4"}, "")
@@ -215,8 +219,9 @@ func TestNodeRegistry_AllStates_Timeout(t *testing.T) {
 // TestNodeRegistry_MultipleNodes 验证多节点注册
 func TestNodeRegistry_MultipleNodes(t *testing.T) {
 	reg := &nodeRegistry{
-		nodes: make(map[string]*NodeState),
-		info:  make(map[string]*NodeInfo),
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
 	}
 
 	for i := 0; i < 5; i++ {
@@ -232,8 +237,9 @@ func TestNodeRegistry_MultipleNodes(t *testing.T) {
 // TestNodeRegistry_ConcurrentAccess 验证并发安全
 func TestNodeRegistry_ConcurrentAccess(t *testing.T) {
 	reg := &nodeRegistry{
-		nodes: make(map[string]*NodeState),
-		info:  make(map[string]*NodeInfo),
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
 	}
 
 	reg.register(&NodeInfo{NodeID: "concurrent-node"}, "")
@@ -256,6 +262,124 @@ func TestNodeRegistry_ConcurrentAccess(t *testing.T) {
 	states := reg.allStates()
 	if len(states) != 1 {
 		t.Errorf("expected 1 node, got %d", len(states))
+	}
+}
+
+// TestNodeByAddr 验证通过 peer 地址查找节点 ID
+func TestNodeByAddr(t *testing.T) {
+	reg := &nodeRegistry{
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
+	}
+
+	info1 := &NodeInfo{NodeID: "node-1", Hostname: "host-a"}
+	info2 := &NodeInfo{NodeID: "node-2", Hostname: "host-b"}
+
+	reg.register(info1, "10.0.0.1:54321")
+	reg.register(info2, "10.0.0.2:54321")
+
+	if got := reg.nodeByAddr("10.0.0.1:54321"); got != "node-1" {
+		t.Errorf("nodeByAddr(10.0.0.1) = %q, want %q", got, "node-1")
+	}
+	if got := reg.nodeByAddr("10.0.0.2:54321"); got != "node-2" {
+		t.Errorf("nodeByAddr(10.0.0.2) = %q, want %q", got, "node-2")
+	}
+	if got := reg.nodeByAddr("10.0.0.3:54321"); got != "" {
+		t.Errorf("nodeByAddr(unknown) = %q, want empty string", got)
+	}
+}
+
+// TestNodeRegistryGCOfflineNodes 验证超时离线节点清理
+func TestNodeRegistryGCOfflineNodes(t *testing.T) {
+	reg := &nodeRegistry{
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
+	}
+
+	info1 := &NodeInfo{NodeID: "node-1"}
+	info2 := &NodeInfo{NodeID: "node-2"}
+
+	reg.register(info1, "10.0.0.1:11111")
+	reg.register(info2, "10.0.0.2:22222")
+
+	// 将 node-1 设为离线（很久以前）
+	reg.mu.Lock()
+	if s, ok := reg.nodes["node-1"]; ok {
+		s.Online = false
+		s.LastSeen = time.Now().Add(-1 * time.Hour)
+	}
+	reg.mu.Unlock()
+
+	// GC: maxAge 10min, node-1 离线 1h → 应被清理
+	reg.gcOfflineNodes(10 * time.Minute)
+
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+
+	if _, ok := reg.nodes["node-1"]; ok {
+		t.Error("node-1 should have been cleaned up")
+	}
+	if _, ok := reg.nodes["node-2"]; !ok {
+		t.Error("node-2 should remain (online)")
+	}
+	if _, ok := reg.mapping["10.0.0.1:11111"]; ok {
+		t.Error("node-1 mapping should have been cleaned up")
+	}
+	if _, ok := reg.mapping["10.0.0.2:22222"]; !ok {
+		t.Error("node-2 mapping should remain")
+	}
+}
+
+// TestNodeRegistryMarkOffline 验证离线标记
+func TestNodeRegistryMarkOffline(t *testing.T) {
+	reg := &nodeRegistry{
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
+	}
+
+	info := &NodeInfo{NodeID: "node-1"}
+	reg.register(info, "10.0.0.1:12345")
+
+	states := reg.allStates()
+	if !states[0].Online {
+		t.Error("new node should be online")
+	}
+
+	reg.markOffline("node-1")
+
+	states = reg.allStates()
+	if states[0].Online {
+		t.Error("marked offline node should show online=false")
+	}
+}
+
+// TestNodeRegistryAllStatesTimeoutAutoOffline 验证超时自动标记离线
+func TestNodeRegistryAllStatesTimeoutAutoOffline(t *testing.T) {
+	reg := &nodeRegistry{
+		nodes:   make(map[string]*NodeState),
+		info:    make(map[string]*NodeInfo),
+		mapping: make(map[string]string),
+	}
+
+	info := &NodeInfo{NodeID: "node-1"}
+	reg.register(info, "10.0.0.1:12345")
+
+	// 模拟上次心跳在 2 分钟前（超过 90s 超时）
+	reg.mu.Lock()
+	if s, ok := reg.nodes["node-1"]; ok {
+		s.LastSeen = time.Now().Add(-2 * time.Minute)
+	}
+	reg.mu.Unlock()
+
+	states := reg.allStates()
+	if len(states) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(states))
+	}
+	if states[0].Online {
+		t.Error("timed-out node should be auto-marked offline")
 	}
 }
 

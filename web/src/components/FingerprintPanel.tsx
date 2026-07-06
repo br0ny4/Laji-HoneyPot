@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { apiFetch } from '../api';
 import Skeleton from './Skeleton';
+import { getBrowserIcon } from './BrowserIcons';
 
 interface Fingerprint {
   id: number;
@@ -195,7 +196,7 @@ export default function FingerprintPanel() {
                   const info = getUAInfo(selected.user_agent);
                   return (
                     <div className="ua-badge-row">
-                      <span className="ua-badge">{info.icon}</span>
+                      {getBrowserIcon(info.browser)}
                       <span>{info.browser} / {info.os}</span>
                     </div>
                   );
@@ -234,8 +235,8 @@ export default function FingerprintPanel() {
                 <span className="fp-group-count">{group.count} 条</span>
                 <span className="fp-group-time">{new Date(group.latest).toLocaleString('zh-CN')}</span>
                 <span className="fp-group-browsers">
-                  {[...new Set(group.items.map((f) => getUAInfo(f.user_agent).icon))].slice(0, 5).map((icon, i) => (
-                    <span key={i} className="fp-browser-icon">{icon}</span>
+                  {[...new Set(group.items.map((f) => getUAInfo(f.user_agent).browser))].slice(0, 5).map((browser, i) => (
+                    <span key={i} className="fp-browser-icon">{getBrowserIcon(browser)}</span>
                   ))}
                 </span>
               </div>
@@ -247,7 +248,7 @@ export default function FingerprintPanel() {
                       <span className="fp-item-time">{new Date(f.timestamp).toLocaleTimeString('zh-CN')}</span>
                       <span className="fp-item-tracking mono">{f.tracking_id.slice(0, 12)}...</span>
                       <span className="fp-item-ua">{parseFingerprintData(f.raw_data)}</span>
-                      <span className="fp-item-browser">{getUAInfo(f.user_agent).icon}</span>
+                      <span className="fp-item-browser">{getBrowserIcon(getUAInfo(f.user_agent).browser)}</span>
                     </div>
                   ))}
                 </div>
@@ -281,7 +282,7 @@ export default function FingerprintPanel() {
                   <td className="mono fp-tracking-cell">{f.tracking_id.slice(0, 12)}...</td>
                   <td className="mono">{f.remote_ip}</td>
                   <td>
-                    <span className="fp-browser-tag" title={f.user_agent}>{info.icon} {info.browser}</span>
+                    <span className="fp-browser-tag" title={f.user_agent}>{getBrowserIcon(info.browser)} {info.browser}</span>
                   </td>
                   <td className="cell-ua">{parseFingerprintData(f.raw_data)}</td>
                   <td>

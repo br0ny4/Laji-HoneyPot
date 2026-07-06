@@ -132,8 +132,51 @@ install_git() {
     info "Git 安装完成"
 }
 
+# ---- PATH 恢复（针对 trae-sandbox 环境 PATH 退化） ----
+ensure_path() {
+    local missing=()
+    local restored=()
+    for cmd in go node npm git curl; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("$cmd")
+        fi
+    done
+    if [ ${#missing[@]} -eq 0 ]; then
+        return 0
+    fi
+    # 预置常用 PATH 条目
+    local extra_paths="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$HOME/go/bin"
+    # 附加 nvm node 路径
+    for nvm_dir in "$HOME/.nvm/versions/node"/*; do
+        if [ -d "$nvm_dir/bin" ]; then
+            extra_paths="$extra_paths:$nvm_dir/bin"
+        fi
+    done 2>/dev/null
+    export PATH="${extra_paths}:${PATH}"
+    # 检查恢复了哪些
+    for cmd in "${missing[@]}"; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            restored+=("$cmd")
+        fi
+    done
+    local still_missing=()
+    for cmd in "${missing[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            still_missing+=("$cmd")
+        fi
+    done
+    if [ ${#restored[@]} -gt 0 ]; then
+        warn "PATH 恢复: ${restored[*]} 已恢复可用"
+    fi
+    if [ ${#still_missing[@]} -gt 0 ]; then
+        warn "PATH 恢复不完全，以下命令仍不可用: ${still_missing[*]}"
+    fi
+}
+
 # ---- 主流程 ----
 main() {
+    ensure_path
+
     echo -e "${CYAN}"
     echo "  ╔══════════════════════════════════════════╗"
     echo "  ║     Laji-HoneyPot 一键部署脚本           ║"

@@ -7,6 +7,40 @@
 # ============================================================
 set -e
 
+# ---- PATH 恢复（针对 trae-sandbox 环境 PATH 退化） ----
+ensure_path() {
+    local missing=()
+    local restored=()
+    for cmd in go perl; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("$cmd")
+        fi
+    done
+    if [ ${#missing[@]} -eq 0 ]; then
+        return 0
+    fi
+    local extra_paths="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$HOME/go/bin"
+    export PATH="${extra_paths}:${PATH}"
+    for cmd in "${missing[@]}"; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            restored+=("$cmd")
+        fi
+    done
+    local still_missing=()
+    for cmd in "${missing[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            still_missing+=("$cmd")
+        fi
+    done
+    if [ ${#restored[@]} -gt 0 ]; then
+        echo "[WARN] PATH 恢复: ${restored[*]} 已恢复可用"
+    fi
+    if [ ${#still_missing[@]} -gt 0 ]; then
+        echo "[WARN] PATH 恢复不完全，以下命令仍不可用: ${still_missing[*]}"
+    fi
+}
+ensure_path
+
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 README="$PROJECT_DIR/README.md"
 VERSION_FILE="$PROJECT_DIR/internal/core/version.go"

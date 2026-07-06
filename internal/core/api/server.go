@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -47,6 +48,7 @@ type Server struct {
 	profileBuilder  *profile.Builder     // 攻击者画像构建器
 	clusterMgr      *cluster.Manager     // 集群管理端 (可选)
 	clusterGen      *cluster.Generator   // Agent 生成引擎 (可选)
+	clusterCompiler *cluster.Compiler    // Agent 编译引擎 (v0.17.2)
 	trapConfigData  []byte               // 陷阱配置 JSON 缓存（启动时写入，只读）
 	traceEngine     *traceability.Engine // 溯源反制引擎（深度反制API）
 	hpEngine        *honeypot.Engine     // 蜜罐引擎（服务状态查询）
@@ -97,6 +99,11 @@ func (s *Server) SetClusterManager(mgr *cluster.Manager) {
 // SetClusterGenerator 设置 Agent 生成引擎（由 main 注入）
 func (s *Server) SetClusterGenerator(gen *cluster.Generator) {
 	s.clusterGen = gen
+}
+
+// SetClusterCompiler 设置 Agent 编译引擎（由 main 注入, v0.17.2）
+func (s *Server) SetClusterCompiler(compiler *cluster.Compiler) {
+	s.clusterCompiler = compiler
 }
 
 // consumeClusterEvents 消费集群 EventCh 中的事件并缓冲到内存（最多保留 500 条）
@@ -212,6 +219,10 @@ func (s *Server) registerRoutes() {
 	// Agent 生成引擎
 	s.mux.HandleFunc("/api/cluster/agent/generate", s.handleAgentGenerate)
 	s.mux.HandleFunc("/api/cluster/agent/package", s.handleAgentPackage) // v0.17.1: 部署包下载
+	// Agent 编译引擎 (v0.17.2)
+	s.mux.HandleFunc("/api/cluster/agent/compile", s.handleAgentCompile)
+	s.mux.HandleFunc("/api/cluster/agent/compile/status", s.handleAgentCompileStatus)
+	s.mux.HandleFunc("/api/cluster/agent/compile/download", s.handleAgentCompileDownload)
 	// 集群事件聚合
 	s.mux.HandleFunc("/api/cluster/events", s.handleClusterEvents)
 	// 陷阱配置
@@ -1189,6 +1200,144 @@ func (s *Server) handleAgentPackage(w http.ResponseWriter, r *http.Request) {
 	w.Write(buf.Bytes())
 
 	s.logger.Infow("agent package served", "os", osTarget, "scenario", scenario, "size_bytes", buf.Len())
+}
+
+// handleAgentCompile 启动 Agent 异步编译任务 (v0.17.2)
+// POST /api/cluster/agent/compile
+// Body: CompileRequest (含 os_target, goarch, scenario, manager_addr 等)
+// 返回: { job_id, status: "compiling" }
+func (s *Server) handleAgentCompile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+
+	if s.clusterCompiler == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "agent compiler not available",
+			"hint":  "management node must be running with compiler support",
+		})
+		return
+	}
+
+	var req cluster.CompileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("invalid request body: %v", err),
+		})
+		return
+	}
+
+	if req.ManagerAddr == "" {
+		req.ManagerAddr = r.Host
+	}
+	if req.OSTarget == "" {
+		req.OSTarget = "linux"
+	}
+	if req.GOARCH == "" {
+		req.GOARCH = "amd64"
+	}
+
+	result, err := s.clusterCompiler.Compile(req)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	s.logger.Infow("agent compile started",
+		"job_id", result.JobID,
+		"os", req.OSTarget,
+		"arch", req.GOARCH,
+	)
+
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+// handleAgentCompileStatus 查询编译任务进度 (v0.17.2)
+// GET /api/cluster/agent/compile/status?job_id=xxx
+func (s *Server) handleAgentCompileStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET required"})
+		return
+	}
+
+	if s.clusterCompiler == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "compiler not available"})
+		return
+	}
+
+	jobID := r.URL.Query().Get("job_id")
+	if jobID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "job_id query parameter required"})
+		return
+	}
+
+	result := s.clusterCompiler.GetJob(jobID)
+	if result == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleAgentCompileDownload 下载编译完成的部署包 (v0.17.2)
+// GET /api/cluster/agent/compile/download?job_id=xxx
+func (s *Server) handleAgentCompileDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "GET required"})
+		return
+	}
+
+	if s.clusterCompiler == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "compiler not available"})
+		return
+	}
+
+	jobID := r.URL.Query().Get("job_id")
+	if jobID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "job_id query parameter required"})
+		return
+	}
+
+	result := s.clusterCompiler.GetJob(jobID)
+	if result == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		return
+	}
+
+	if result.Status != "complete" {
+		writeJSON(w, http.StatusTooEarly, map[string]interface{}{
+			"error":    "compilation not complete",
+			"status":   result.Status,
+			"progress": result.Progress,
+		})
+		return
+	}
+
+	// 确定文件路径和 MIME 类型
+	pkgPath := result.PackagePath
+	if _, err := os.Stat(pkgPath); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "package file not found on disk",
+		})
+		return
+	}
+
+	contentType := "application/gzip"
+	if strings.HasSuffix(result.PackageName, ".zip") {
+		contentType = "application/zip"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"`, result.PackageName))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", result.PackageSize))
+
+	http.ServeFile(w, r, pkgPath)
+	s.logger.Infow("agent package downloaded", "job_id", jobID, "size_bytes", result.PackageSize)
 }
 
 // ============================================================

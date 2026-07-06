@@ -1,6 +1,32 @@
-# 优化 TODO 清单 — Laji-HoneyPot v0.16.0
+# 优化 TODO 清单 — Laji-HoneyPot v0.17.3
 
-> 生成时间: 2026-07-02 | 更新时间: 2026-07-03 (v0.16.0) | 测试环境: macOS (Manager) + Win11 (Agent)
+> 生成时间: 2026-07-02 | 更新时间: 2026-07-04 (v0.17.3) | 测试环境: macOS (Manager) + Win11 (Agent)
+
+---
+
+## v0.17.3 迭代修复摘要 (2026-07-04)
+
+**迭代主题: 工程稳定性 + 可观测性增强**
+
+### P0 修复
+| ID | 修复内容 | 涉及文件 |
+|----|---------|---------|
+| TODO-002 | PATH 退化恢复：ensure_path() 函数预置常见 PATH 条目，覆盖 install.sh/honeypot-ctl/auto-update-readme.sh | install.sh, honeypot-ctl, auto-update-readme.sh |
+
+### P1 修复
+| ID | 修复内容 | 涉及文件 |
+|----|---------|---------|
+| TODO-005 | Agent 自动探测本机 IP：outboundIP() 通过 Dial 管理端获取 LocalAddr，填充 NodeInfo.IP | agent.go |
+| TODO-015 | 浏览器 SVG 图标：BrowserIcons.tsx（Chrome/Firefox/Safari/Edge/Opera），替换指纹面板 4 处单字母 badge | BrowserIcons.tsx, FingerprintPanel.tsx |
+
+### P2 优化
+| ID | 修复内容 | 涉及文件 |
+|----|---------|---------|
+| TODO-007 | SQLite 性能基线：4 个 benchmark（RecordConnection/GetStats/GetFingerprints/ConcurrentWrites） | store/bench_test.go |
+
+### 单元测试
+- 全量: 30/30 包 PASS，0 FAIL，go vet 零预警
+- TypeScript: tsc --noEmit OK
 
 ---
 
@@ -146,7 +172,7 @@
 | ID | 问题 | 影响范围 | 复现条件 | 整改方向 |
 |----|------|---------|---------|---------|
 | TODO-001 | `/wp-admin/setup-config.php` 和 `/grafana/login` 两个面包屑路径持续超时 | 面包屑覆盖缺口 2/10，降低 20% 诱捕面 | 高并发访问时触发，单次请求也偶现超时 | ✅ v0.14.0 已修复 — HTTP回调改异步goroutine+5s超时+优雅降级 |
-| TODO-002 | 终端环境 PATH 丢失导致 `curl`/`lsof`/`python3` 等命令不可用 | 管理端运维、自动化测试脚本执行失败 | 长时间会话后沙箱环境退化 | 排查 sandbox/trae 包装层，考虑增加 PATH 恢复机制或使用绝对路径调用 |
+| TODO-002 | 终端环境 PATH 丢失导致 `curl`/`lsof`/`python3` 等命令不可用 | 管理端运维、自动化测试脚本执行失败 | 长时间会话后沙箱环境退化 | ✅ v0.17.3 已修复 — install.sh/honeypot-ctl/auto-update-readme.sh 中新增 ensure_path() 函数，缺失时自动预置常见 PATH |
 
 ---
 
@@ -156,7 +182,7 @@
 |----|------|---------|---------|---------|
 | TODO-003 | 指纹采集依赖浏览器端 JS 执行，curl/nmap/sqlmap 等非浏览器工具访问时不触发指纹采集 | 溯源覆盖率不足，CLI 工具攻击者无法被指纹识别 | 任何非浏览器 User-Agent 的 HTTP 请求 | ✅ v0.15.0 已修复 — 服务端 extractHeaderFingerprint() 从 UA/Accept-Language/Referer 头部提取兜底指纹 |
 | TODO-004 | Burp payload 中 implant 关键字为 JS 变量小写形式（`screen_cap`/`exfil`），而非 Go 侧结构体名（`ScreenCapture`/`FileScan`/`NetProbe`） | 测试脚本关键字匹配失败，不影响功能 | 无（命名不一致为设计问题） | ✅ v0.15.0 已修复 — screencap.go 中 screen_cap→screen_capture，统一 Go/JS 命名 |
-| TODO-005 | Agent 节点的 API 端口 (8080) 未将 agent 自身 IP 注册到拓扑中 | 拓扑图中不会显示 Agent 节点自身的攻击面 | Agent 注册后，仅作为集群节点显示，不参与攻击者拓扑 | 在 agent 注册时将自身 service 端口信息推送至拓扑端点 |
+| TODO-005 | Agent 节点的 API 端口 (8080) 未将 agent 自身 IP 注册到拓扑中 | 拓扑图中不会显示 Agent 节点自身的攻击面 | Agent 注册后，仅作为集群节点显示，不参与攻击者拓扑 | ✅ v0.17.3 已修复 — 新增 outboundIP() 通过 Dial 管理端获取本机出网 IP，填充 NodeInfo.IP 字段 |
 
 ---
 
@@ -165,7 +191,7 @@
 | ID | 问题 | 影响范围 | 复现条件 | 整改方向 |
 |----|------|---------|---------|---------|
 | TODO-006 | 高并发面包屑测试时 2/10 路径超时（疑似 goroutine 泄漏或连接池耗尽） | 面包屑可靠性下降 | 连续 30+ 请求后出现 | 增加 HTTP client 超时控制、连接池大小配置、goroutine leak detector |
-| TODO-007 | `go-sqlite3` → `modernc.org/sqlite` 迁移后缺少性能基线对比 | 不确定纯 Go SQLite 性能是否满足生产需求 | 始终存在 | 建立 SQLite 压测脚本，对比 CGO/纯 Go 版本 QPS 差异 |
+| TODO-007 | `go-sqlite3` → `modernc.org/sqlite` 迁移后缺少性能基线对比 | 不确定纯 Go SQLite 性能是否满足生产需求 | 始终存在 | ✅ v0.17.3 已修复 — 新增 store/bench_test.go（4个benchmark含并发写入） |
 | TODO-008 | VulnDB NVD 爬虫在 Win11 Agent 侧因网络限制报错 "github search failed" | Agent 漏洞库更新依赖外网，内网 Agent 无法自更新 | 无外网的 Agent 节点 | 支持从 Manager 节点同步 VulnDB 数据到 Agent |
 
 ---
@@ -191,7 +217,7 @@
 | ID | 问题 | 影响范围 | 复现条件 | 整改方向 |
 |----|------|---------|---------|---------|
 | TODO-014 | 前端未对令牌过期做 UI 提示，401 后仅重定向到登录页 | 用户体验差，未保存工作可能丢失 | 令牌过期后继续操作 | ✅ v0.14.0 已修复 — apiFetch 401 处理前弹出 Toast 提示"会话已过期，请重新登录"，3 秒自动消失 |
-| TODO-015 | 指纹分组视图的浏览器图标区分度有限（单字母染色） | 多浏览器场景下辨识度不足 | 同时存在 Chrome/Firefox/Safari/Edge 时 | 引入 SVG 浏览器图标或更精细的颜色编码方案 |
+| TODO-015 | 指纹分组视图的浏览器图标区分度有限（单字母染色） | 多浏览器场景下辨识度不足 | 同时存在 Chrome/Firefox/Safari/Edge 时 | ✅ v0.17.3 已修复 — BrowserIcons.tsx 提供 6 种内联 SVG 图标，替换指纹面板全部 4 处 badge |
 | TODO-016 | 部分 Panel 数据加载无 Loading 骨架屏 | 初始加载时显示空白，体验生硬 | 所有数据首次加载场景 | ✅ v0.14.0 已修复 — Loading Skeleton 组件（card/table/text 三种变体 + 脉冲动画） |
 
 ## P2 — 兼容性与跨浏览器 (v0.12.0 新增)

@@ -18,6 +18,7 @@ import (
 //   - 维护节点注册表 (nodeRegistry)
 //   - 处理心跳、事件转发、配置下发
 //   - 提供节点状态查询接口 (供 API/frontend 使用)
+//   - 定期清理超时离线节点
 type Manager struct {
 	logger   *log.Logger
 	registry *nodeRegistry
@@ -27,15 +28,17 @@ type Manager struct {
 	// 事件转发通道：节点推送的事件 → 管理端事件总线
 	EventCh chan ClusterEvent
 
-	mu     sync.RWMutex
-	closed bool
+	mu       sync.RWMutex
+	closed   bool
+	stopCh   chan struct{}
 }
 
 // nodeRegistry 节点注册表（线程安全）
 type nodeRegistry struct {
-	mu    sync.RWMutex
-	nodes map[string]*NodeState // nodeID → state
-	info  map[string]*NodeInfo  // nodeID → static info
+	mu      sync.RWMutex
+	nodes   map[string]*NodeState // nodeID → state
+	info    map[string]*NodeInfo  // nodeID → static info
+	mapping map[string]string     // peer addr → nodeID (用于快速查找)
 }
 
 // NewManager 创建集群管理端
@@ -44,11 +47,13 @@ func NewManager(logger *log.Logger, tlsConfig *tls.Config) *Manager {
 	return &Manager{
 		logger:   logger,
 		registry: &nodeRegistry{
-			nodes: make(map[string]*NodeState),
-			info:  make(map[string]*NodeInfo),
+			nodes:   make(map[string]*NodeState),
+			info:    make(map[string]*NodeInfo),
+			mapping: make(map[string]string),
 		},
 		tlsCfg:  tlsConfig,
 		EventCh: make(chan ClusterEvent, 256),
+		stopCh:  make(chan struct{}),
 	}
 }
 
@@ -62,6 +67,7 @@ func (m *Manager) Listen(addr string) error {
 	m.logger.Infow("cluster manager listening", "addr", addr)
 
 	go m.acceptLoop()
+	go m.gcLoop() // 定期清理超时离线节点
 	return nil
 }
 
@@ -83,6 +89,39 @@ func (m *Manager) acceptLoop() {
 	}
 }
 
+// gcLoop 定期清理超过 GC 超时的离线节点（默认 10 分钟）
+func (m *Manager) gcLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.registry.gcOfflineNodes(10 * time.Minute)
+		}
+	}
+}
+
+// safeSendEvent 安全发送事件到 EventCh（防止 closed channel panic）
+func (m *Manager) safeSendEvent(evt ClusterEvent) {
+	m.mu.RLock()
+	if m.closed {
+		m.mu.RUnlock()
+		return
+	}
+	m.mu.RUnlock()
+
+	select {
+	case m.EventCh <- evt:
+	default:
+		m.logger.Warnw("cluster event channel full, dropping event",
+			"topic", evt.Topic,
+		)
+	}
+}
+
 // handleNode 处理单个远程节点的连接生命周期
 func (m *Manager) handleNode(conn net.Conn) {
 	defer conn.Close()
@@ -98,10 +137,19 @@ func (m *Manager) handleNode(conn net.Conn) {
 			if err != io.EOF {
 				m.logger.Warnw("cluster read error", "peer", peer, "error", err)
 			}
-			// 节点断连 → 标记离线
+			// 节点断连 → 查找并标记离线
 			if nodeID := m.registry.nodeByAddr(peer); nodeID != "" {
 				m.registry.markOffline(nodeID)
 				m.logger.Infow("cluster node disconnected", "node_id", nodeID, "peer", peer)
+
+				// 广播节点离线事件
+				if info := m.registry.getInfo(nodeID); info != nil {
+					m.safeSendEvent(ClusterEvent{
+						Topic:     "cluster.node_offline",
+						Timestamp: time.Now().UnixMilli(),
+						Payload:   info,
+					})
+				}
 			}
 			return
 		}
@@ -133,13 +181,12 @@ func (m *Manager) handleRegister(fr *framer, msg *Message, peer string) {
 		req.Node.NodeID = fmt.Sprintf("%s-%s", req.Node.Hostname, randomHex(8))
 	}
 
-	// 注册节点
+	// 注册节点（记录 peer → nodeID 映射）
 	m.registry.register(&req.Node, peer)
 
 	m.logger.Infow("cluster node registered",
 		"node_id", req.Node.NodeID,
 		"hostname", req.Node.Hostname,
-		"ip", req.Node.IP,
 		"services", req.Node.Services,
 	)
 
@@ -152,11 +199,11 @@ func (m *Manager) handleRegister(fr *framer, msg *Message, peer string) {
 	fr.writeMessage(MsgTypeRegister, req.Node.NodeID, resp)
 
 	// 广播节点上线事件
-	m.EventCh <- ClusterEvent{
+	m.safeSendEvent(ClusterEvent{
 		Topic:     "cluster.node_online",
 		Timestamp: time.Now().UnixMilli(),
 		Payload:   req.Node,
-	}
+	})
 }
 
 // handleHeartbeat 处理节点心跳
@@ -183,14 +230,7 @@ func (m *Manager) handleEventPush(msg *Message) {
 	}
 
 	for _, evt := range fwd.Events {
-		select {
-		case m.EventCh <- evt:
-		default:
-			m.logger.Warnw("cluster event channel full, dropping event",
-				"node_id", msg.NodeID,
-				"topic", evt.Topic,
-			)
-		}
+		m.safeSendEvent(evt)
 	}
 }
 
@@ -210,6 +250,8 @@ func (m *Manager) Close() {
 	m.closed = true
 	m.mu.Unlock()
 
+	close(m.stopCh)
+
 	if m.listener != nil {
 		m.listener.Close()
 	}
@@ -228,6 +270,7 @@ func (r *nodeRegistry) register(info *NodeInfo, addr string) {
 		Online:   true,
 		LastSeen: time.Now(),
 	}
+	r.mapping[addr] = info.NodeID // 记录 peer → nodeID 映射
 }
 
 func (r *nodeRegistry) heartbeat(nodeID string, stats *HeartbeatStats) {
@@ -255,29 +298,46 @@ func (r *nodeRegistry) markOffline(nodeID string) {
 	}
 }
 
+// nodeByAddr 通过 peer 地址查找节点 ID（O(1) 查询）
 func (r *nodeRegistry) nodeByAddr(addr string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	// 简单实现：遍历找匹配 (小规模场景足够)
-	for id := range r.nodes {
-		return id // 当前连接只有单节点，直接返回第一个
-	}
-	return ""
+	return r.mapping[addr]
 }
 
+// allStates 返回所有节点状态（自动标记超时心跳节点为离线）
 func (r *nodeRegistry) allStates() []NodeState {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	result := make([]NodeState, 0, len(r.nodes))
 	for _, state := range r.nodes {
-		// 30 秒无心跳则视为离线
-		if state.Online && time.Since(state.LastSeen) > 60*time.Second {
+		// 超过心跳超时时间（3倍心跳间隔，默认 90s）未收到心跳视为离线
+		if state.Online && time.Since(state.LastSeen) > 90*time.Second {
 			state.Online = false
 		}
 		result = append(result, *state)
 	}
 	return result
+}
+
+// gcOfflineNodes 清理超过指定时间的离线节点记录
+func (r *nodeRegistry) gcOfflineNodes(maxAge time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, state := range r.nodes {
+		if !state.Online && time.Since(state.LastSeen) > maxAge {
+			delete(r.nodes, id)
+			delete(r.info, id)
+			// 清理 addr 映射
+			for addr, nid := range r.mapping {
+				if nid == id {
+					delete(r.mapping, addr)
+				}
+			}
+		}
+	}
 }
 
 func (r *nodeRegistry) getInfo(nodeID string) *NodeInfo {

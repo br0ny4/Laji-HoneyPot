@@ -70,7 +70,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           </button>
         </form>
         <p className="login-footer">
-          默认账号: admin / admin123
+          首次使用请登录并修改默认密码
         </p>
       </div>
     </div>
