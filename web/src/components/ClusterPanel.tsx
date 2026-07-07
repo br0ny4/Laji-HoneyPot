@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiFetch } from '../api';
+import { apiFetch, controlAgentDaemon } from '../api';
 
 // 集群节点状态（对应后端 cluster.NodeState）
 interface NodeState {
@@ -18,6 +18,11 @@ interface ClusterNodesResponse {
   cluster_enabled: boolean;
 }
 
+interface ClusterPanelProps {
+  onNodesLoaded?: (nodes: Array<{ node_id: string; online: boolean }>) => void;
+  onNavigateTab?: (tab: string, nodeId?: string) => void;
+}
+
 // 格式化运行时间
 function formatUptime(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -26,10 +31,17 @@ function formatUptime(seconds: number): string {
   return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
 }
 
-export default function ClusterPanel() {
+const DAEMON_ACTIONS = [
+  { key: 'start' as const, label: '▶', title: '启动守护进程' },
+  { key: 'stop' as const, label: '■', title: '停止守护进程' },
+  { key: 'restart' as const, label: '↻', title: '重启守护进程' },
+];
+
+export default function ClusterPanel({ onNodesLoaded, onNavigateTab }: ClusterPanelProps) {
   const [data, setData] = useState<ClusterNodesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [daemonLoading, setDaemonLoading] = useState<Record<string, boolean>>({});
 
   // 周期性拉取节点状态 (每 10 秒)
   useEffect(() => {
@@ -52,7 +64,25 @@ export default function ClusterPanel() {
     fetchNodes();
     const interval = setInterval(fetchNodes, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [onNodesLoaded]);
+
+  // 通知父组件节点列表变化
+  useEffect(() => {
+    if (data?.nodes && onNodesLoaded) {
+      onNodesLoaded(data.nodes.map(n => ({ node_id: n.node_id, online: n.online })));
+    }
+  }, [data, onNodesLoaded]);
+
+  // 守护进程控制
+  const handleDaemonControl = async (nodeID: string, action: 'start' | 'stop' | 'restart') => {
+    setDaemonLoading(prev => ({ ...prev, [nodeID + ':' + action]: true }));
+    try {
+      await controlAgentDaemon(nodeID, action);
+    } catch (e) {
+      setError(`守护进程 ${action} 失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setDaemonLoading(prev => ({ ...prev, [nodeID + ':' + action]: false }));
+  };
 
   return (
     <div className="attack-panel">
@@ -105,6 +135,7 @@ export default function ClusterPanel() {
               <th>攻击数</th>
               <th>指纹采集</th>
               <th>运行时间</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -135,11 +166,42 @@ export default function ClusterPanel() {
                 <td>{node.attacks.toLocaleString()}</td>
                 <td>{node.fingerprints.toLocaleString()}</td>
                 <td>{formatUptime(node.uptime_seconds)}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {node.online && (
+                      <>
+                        {DAEMON_ACTIONS.map(act => (
+                          <button
+                            key={act.key}
+                            className="btn-daemon"
+                            title={act.title}
+                            disabled={daemonLoading[node.node_id + ':' + act.key]}
+                            onClick={() => handleDaemonControl(node.node_id, act.key)}
+                          >
+                            {daemonLoading[node.node_id + ':' + act.key] ? '…' : act.label}
+                          </button>
+                        ))}
+                        {onNavigateTab && (
+                          <button
+                            className="btn-upgrade-link"
+                            title="创建升级任务"
+                            onClick={() => onNavigateTab('upgrade', node.node_id)}
+                          >
+                            升级
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {!node.online && (
+                      <span style={{ fontSize: 11, color: '#475569' }}>离线不可操作</span>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
             {data.nodes.length === 0 && (
               <tr>
-                <td colSpan={7} className="empty-hint">
+                <td colSpan={8} className="empty-hint">
                   暂无已注册节点 — 等待远程蜜罐节点连接
                 </td>
               </tr>

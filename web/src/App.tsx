@@ -10,13 +10,14 @@ import AttackerProfilePanel from './components/AttackerProfilePanel';
 import ClusterPanel from './components/ClusterPanel';
 import AgentDeployPanel from './components/AgentDeployPanel';
 import BaitLinkagePanel from './components/BaitLinkagePanel';
+import UpgradePanel from './components/UpgradePanel';
 import StatusBar from './components/StatusBar';
 import LoginPage from './components/LoginPage';
 import ChangePasswordPage from './components/ChangePasswordPage';
 import { isLoggedIn, logout } from './api';
 import './App.css';
 
-type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages';
+type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages' | 'upgrade';
 
 interface TabDef {
   key: Tab;
@@ -36,12 +37,15 @@ const tabs: TabDef[] = [
   { key: 'ops', label: '运维管理', icon: '' },
   { key: 'profiles', label: '攻击者画像', icon: '' },
   { key: 'linkages', label: '蜜饵联动', icon: '' },
+  { key: 'upgrade', label: 'Agent升级', icon: '' },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [authenticated, setAuthenticated] = useState(isLoggedIn());
   const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [clusterNodes, setClusterNodes] = useState<Array<{ node_id: string; online: boolean }>>([]);
+  const [preselectedNode, setPreselectedNode] = useState<string | undefined>();
 
   // 定期检查令牌状态
   useEffect(() => {
@@ -69,6 +73,11 @@ export default function App() {
     setActiveTab('dashboard');
   };
 
+  const handleNavigateTab = (tab: string, nodeId?: string) => {
+    setPreselectedNode(nodeId);
+    setActiveTab(tab as Tab);
+  };
+
   if (!authenticated) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
@@ -83,7 +92,7 @@ export default function App() {
       <header className="app-header">
         <div className="header-left">
           <h1 className="app-title">Laji-HoneyPot</h1>
-          <span className="app-version">v0.16.0</span>
+          <span className="app-version">v0.19.0</span>
         </div>
         <div className="header-right">
           <span className="status-indicator status-online" />
@@ -114,11 +123,19 @@ export default function App() {
         {activeTab === 'fingerprints' && <FingerprintPanel />}
         {activeTab === 'countermeasures' && <CountermeasurePanel />}
         {activeTab === 'assets' && <AssetLedger />}
-        {activeTab === 'cluster' && <ClusterPanel />}
+        {activeTab === 'cluster' && (
+          <ClusterPanel
+            onNodesLoaded={setClusterNodes}
+            onNavigateTab={handleNavigateTab}
+          />
+        )}
         {activeTab === 'agent' && <AgentDeployPanel />}
         {activeTab === 'ops' && <OpsPanel />}
         {activeTab === 'profiles' && <AttackerProfilePanel />}
         {activeTab === 'linkages' && <BaitLinkagePanel />}
+        {activeTab === 'upgrade' && (
+          <UpgradePanel nodes={clusterNodes} preselectedNode={preselectedNode} />
+        )}
       </main>
 
       <StatusBar />

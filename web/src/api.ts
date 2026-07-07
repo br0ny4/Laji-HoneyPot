@@ -225,3 +225,83 @@ export function apiEventSource(url: string): EventSource {
 }
 
 export { accessToken, refreshToken, persistTokens };
+
+// ======================== Agent 升级管理 API ========================
+
+export interface UpgradeJob {
+  id: string;
+  version: string;
+  status: string;  // pending | downloading | installing | complete | failed | rollback
+  node_id: string;
+  package_url: string;
+  package_hash: string;
+  progress: number;  // 0.0 - 1.0
+  created_at: string;
+  completed_at?: string;
+  error?: string;
+}
+
+/** 获取升级任务列表 */
+export async function listUpgradeJobs(nodeID?: string): Promise<UpgradeJob[]> {
+  const qs = nodeID ? `?node_id=${encodeURIComponent(nodeID)}` : '';
+  const res = await apiFetch(`/api/upgrade/jobs${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return data.jobs || [];
+}
+
+/** 创建升级任务 */
+export async function createUpgradeJob(nodeID: string, version: string): Promise<UpgradeJob> {
+  const res = await apiFetch('/api/upgrade/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ node_id: nodeID, version }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/** 取消升级任务 */
+export async function cancelUpgradeJob(jobID: string): Promise<void> {
+  const res = await apiFetch(`/api/upgrade/jobs/${encodeURIComponent(jobID)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+/** 获取单个升级任务状态 */
+export async function getUpgradeJob(jobID: string): Promise<UpgradeJob> {
+  const res = await apiFetch(`/api/upgrade/jobs/${encodeURIComponent(jobID)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ======================== Agent 守护进程控制 API ========================
+
+export interface DaemonStatus {
+  node_id: string;
+  installed: boolean;
+  status: string;  // running | stopped | not_installed
+}
+
+/** 获取 Agent 守护进程状态 */
+export async function getAgentDaemonStatus(nodeID?: string): Promise<DaemonStatus> {
+  const qs = nodeID ? `?node_id=${encodeURIComponent(nodeID)}` : '';
+  const res = await apiFetch(`/api/agent/daemon/status${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** 控制 Agent 守护进程 (start/stop/restart) */
+export async function controlAgentDaemon(nodeID: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
+  const res = await apiFetch('/api/agent/daemon/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ node_id: nodeID, action }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+}

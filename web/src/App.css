@@ -2265,6 +2265,50 @@ body {
   color: #38bdf8;
 }
 
+/* ========== 守护进程控制 & 升级按钮 (v0.19.0) ========== */
+.btn-daemon {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #1a2332;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.btn-daemon:hover:not(:disabled) {
+  border-color: #38bdf8;
+  color: #38bdf8;
+  background: #172554;
+}
+.btn-daemon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-upgrade-link {
+  padding: 3px 10px;
+  border: 1px solid #1e3a5f;
+  border-radius: 4px;
+  background: #172554;
+  color: #38bdf8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-upgrade-link:hover {
+  background: #1e3a5f;
+  color: #7dd3fc;
+}
+
 /* ========== 响应式适配 ========== */
 @media (max-width: 768px) {
   .result-overview {
