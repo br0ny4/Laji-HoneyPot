@@ -451,22 +451,34 @@ cmd_password() {
 
     if [ -f "$PROJECT_ROOT/config.yaml" ]; then
         if grep -q 'admin_password_hash' "$PROJECT_ROOT/config.yaml" 2>/dev/null; then
-            # 配置中已有密码哈希，尝试从日志提取
-            if [ -f "$LOG_FILE" ]; then
-                if grep -q '管理端初始密码' "$LOG_FILE" 2>/dev/null; then
+            # 配置中已有密码哈希，尝试从所有日志文件提取（含轮转日志）
+            local found=false
+            local log_files=("$LOG_FILE" "$LOG_FILE".*)
+            for lf in "${log_files[@]}"; do
+                if [ -f "$lf" ] && grep -q '管理端初始密码' "$lf" 2>/dev/null; then
                     echo ""
-                    grep -A 20 '管理端初始密码' "$LOG_FILE" 2>/dev/null | head -20
+                    echo -e "${CYAN}来源: $lf${NC}"
+                    grep -A 20 '管理端初始密码' "$lf" 2>/dev/null | head -20
                     echo ""
                     log_warn "以上密码已在首次启动时生成，请妥善保管！"
                     echo "  如已忘记，可通过管理端 UI 重新设置管理员密码。"
-                else
-                    log_warn "日志中未找到初始密码记录（可能已被清理或日志轮回）"
-                    echo "  密码哈希已存储在 config.yaml 中。"
-                    echo "  如忘记密码，请删除 config.yaml 中的 admin_password_hash 行后重启服务以重新生成。"
+                    found=true
+                    break
                 fi
-            else
-                log_warn "日志文件不存在: $LOG_FILE"
-                echo "  密码哈希已存储在 config.yaml 中。"
+            done
+
+            if [ "$found" = false ]; then
+                echo ""
+                log_warn "所有日志中均未找到初始密码记录（可能已被清理或日志轮转）"
+                echo ""
+                echo -e "  ${BOLD}如何重置管理员密码:${NC}"
+                echo "  1. 用你熟悉的编辑器打开 config.yaml"
+                echo "  2. 删除 admin_password_hash 这一行"
+                echo "  3. 执行: $0 restart"
+                echo "  4. 新密码将自动生成并显示在终端"
+                echo ""
+                echo -e "  ${BOLD}一键重置命令:${NC}"
+                echo "  sed -i '' '/admin_password_hash/d' $PROJECT_ROOT/config.yaml && $0 restart"
             fi
         else
             log_info "尚未生成管理员密码（首次启动时自动生成）"
