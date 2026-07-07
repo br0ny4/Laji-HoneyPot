@@ -493,7 +493,7 @@ func TestBuildDeployCommands_Linux(t *testing.T) {
 		OSTarget:    "linux",
 	}
 
-	commands := c.buildDeployCommands(req, "honeypot-agent", "honeypot-agent-linux-amd64.tar.gz")
+	commands := c.buildDeployCommands(req, "honeypot-agent", "honeypot-agent-linux-amd64.tar.gz", "agent-test")
 
 	if len(commands) == 0 {
 		t.Fatal("should generate commands for linux")
@@ -558,7 +558,7 @@ func TestBuildDeployCommands_Windows(t *testing.T) {
 		OSTarget:    "windows",
 	}
 
-	commands := c.buildDeployCommands(req, "honeypot-agent.exe", "honeypot-agent-windows-amd64.zip")
+	commands := c.buildDeployCommands(req, "honeypot-agent.exe", "honeypot-agent-windows-amd64.zip", "agent-test-win")
 
 	if len(commands) != 4 {
 		t.Errorf("windows should have 4 deploy commands, got %d", len(commands))

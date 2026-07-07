@@ -33,6 +33,7 @@ type AgentDeployRequest struct {
 	CustomURL      string             `json:"custom_url"`      // 自定义下载 URL (binary_source=url 时生效)
 	NodeName       string             `json:"node_name"`       // 节点显示名称 (可选)
 	OSTarget       string             `json:"os_target"`       // 目标操作系统: "linux" 或 "windows", 默认 "linux"
+	APIAddr        string             `json:"-"`               // API 服务器地址 (服务端从 r.Host 自动注入，不暴露给前端)
 }
 
 // AgentDeployArtifact Agent 部署产出物

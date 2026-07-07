@@ -1268,6 +1268,10 @@ func (s *Server) handleAgentCompile(w http.ResponseWriter, r *http.Request) {
 	if req.ManagerAddr == "" {
 		req.ManagerAddr = r.Host
 	}
+	// API 服务器地址（用于生成部署命令中的下载 URL）
+	if req.APIAddr == "" {
+		req.APIAddr = r.Host
+	}
 	if req.OSTarget == "" {
 		req.OSTarget = "linux"
 	}

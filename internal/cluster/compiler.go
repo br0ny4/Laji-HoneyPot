@@ -264,7 +264,7 @@ func (c *Compiler) doCompile(req CompileRequest, r *CompileResult) {
 	r.Progress = 90
 
 	// Step 7: 生成部署命令
-	r.Commands = c.buildDeployCommands(req.AgentDeployRequest, binaryName, packageName)
+	r.Commands = c.buildDeployCommands(req.AgentDeployRequest, binaryName, packageName, r.JobID)
 	r.Progress = 100
 	r.Status = "complete"
 }
@@ -656,16 +656,20 @@ data_dir: "%s"
 }
 
 // buildDeployCommands 生成完整的无依赖部署命令列表
-func (c *Compiler) buildDeployCommands(req AgentDeployRequest, binaryName, packageName string) []DeployCommand {
-	mgmtAddr := req.ManagerAddr
+func (c *Compiler) buildDeployCommands(req AgentDeployRequest, binaryName, packageName, jobID string) []DeployCommand {
+	// 下载地址使用 API 服务器地址（而非集群 ManagerAddr 的 8443 端口）
+	downloadHost := req.APIAddr
+	if downloadHost == "" {
+		downloadHost = req.ManagerAddr // 兜底：用 ManagerAddr
+	}
 
 	if req.OSTarget == "windows" {
 		return []DeployCommand{
 			{
 				Step: 1, Title: "下载部署包",
 				Command: fmt.Sprintf(
-					`curl -o %s http://%s/api/cluster/agent/compile/download?job_id=JOB_ID`,
-					packageName, mgmtAddr),
+					`curl -o %s http://%s/api/cluster/agent/compile/download?job_id=%s`,
+					packageName, downloadHost, jobID),
 				Description: "从管理端下载编译好的部署包（或通过 Web UI 下载按钮直接下载）",
 			},
 			{
@@ -691,9 +695,9 @@ func (c *Compiler) buildDeployCommands(req AgentDeployRequest, binaryName, packa
 		{
 			Step: 1, Title: "下载部署包",
 			Command: fmt.Sprintf(
-				`curl -o %s http://%s/api/cluster/agent/compile/download?job_id=JOB_ID`,
-				packageName, mgmtAddr),
-			Description: "从管理端下载编译好的部署包（将 JOB_ID 替换为实际任务 ID，或通过 Web UI 下载按钮直接下载）",
+				`curl -o %s http://%s/api/cluster/agent/compile/download?job_id=%s`,
+				packageName, downloadHost, jobID),
+			Description: "从管理端下载编译好的部署包（也可通过 Web UI 下载按钮直接下载）",
 		},
 		{
 			Step: 2, Title: "解压部署包",
