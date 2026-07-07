@@ -328,7 +328,7 @@ func (a *AuthManager) Changepassword(username, oldPassword, newPassword string) 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
 		return fmt.Errorf("current password incorrect")
 	}
-	if err := ValidatePassword(newPassword); err != nil {
+	if err := ValidateStrongPassword(newPassword); err != nil {
 		return err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), a.config.BcryptCost)
@@ -424,6 +424,21 @@ func (a *AuthManager) JWTAuthMiddleware(next http.Handler) http.Handler {
 		// 将用户信息注入请求上下文
 		ctx := r.Context()
 		ctx = contextWithClaims(ctx, claims)
+
+		// 强制修改密码检查：仅允许修改密码和登出接口通过
+		user, err := a.store.GetUser(claims.Username)
+		if err == nil && user.MustChangePassword {
+			if r.URL.Path != "/api/auth/changepassword" && r.URL.Path != "/api/auth/logout" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error":                "首次登录请先修改初始密码",
+					"must_change_password": "true",
+				})
+				return
+			}
+		}
+
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

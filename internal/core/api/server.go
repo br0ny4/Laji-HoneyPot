@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -584,10 +585,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCollect(w http.ResponseWriter, r *http.Request) {
-	remoteIP := r.RemoteAddr
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		remoteIP = fwd
-	}
+	remoteIP := getClientIP(r)
 	userAgent := r.Header.Get("User-Agent")
 
 	// 读取或生成追踪 Cookie
@@ -743,6 +741,24 @@ func detectToolFromUA(ua string) string {
 	return "unknown"
 }
 
+// getClientIP 安全地从请求中提取客户端真实 IP
+// 优先取 X-Forwarded-For 的第一个 IP（最左边为原始客户端），
+// 验证 IP 格式后再使用，防止 IP 伪造。
+func getClientIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		parts := strings.Split(fwd, ",")
+		ip := strings.TrimSpace(parts[0])
+		if net.ParseIP(ip) != nil {
+			return ip
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -868,10 +884,7 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		ip := r.RemoteAddr
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			ip = fwd
-		}
+		ip := getClientIP(r)
 		if !rl.allow(ip) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 			return
@@ -1483,10 +1496,7 @@ func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	remoteIP := r.RemoteAddr
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		remoteIP = fwd
-	}
+	remoteIP := getClientIP(r)
 
 	var (
 		data     string
@@ -1535,6 +1545,9 @@ func (s *Server) handleCountermeasureExfil(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
+
+	// 限制请求体大小，防止内存耗尽
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5MB
 
 	s.logger.Infow("countermeasure exfil received",
 		"ip", remoteIP, "type", dataType, "dataLen", len(data))

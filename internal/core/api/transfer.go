@@ -344,10 +344,16 @@ func (h *TransferHub) HandleTransferList(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// sanitizePath 路径安全清理
+// sanitizePath 路径安全清理 — 防止所有路径穿越变体
 func sanitizePath(p string) string {
 	p = filepath.Clean(p)
+	for strings.HasPrefix(p, "..") {
+		p = strings.TrimPrefix(p, "..")
+	}
 	p = strings.TrimPrefix(p, "/")
-	p = strings.TrimPrefix(p, "..")
+	// 最终检查：确保清理后不包含 ".."
+	if strings.Contains(p, "..") {
+		return ""
+	}
 	return p
 }

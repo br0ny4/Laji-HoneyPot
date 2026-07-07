@@ -70,10 +70,31 @@ func TestFindAvailablePort_AllOccupied(t *testing.T) {
 }
 
 func TestCheckServicePorts_AllAvailable(t *testing.T) {
-	// 使用高位端口，大概率空闲
+	// 使用 net.Listen(":0") 找到两个真实空闲端口，然后立即释放
+	findFreePort := func() int {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("failed to find free port: %v", err)
+		}
+		addr := ln.Addr().String()
+		ln.Close()
+		_, portStr, _ := net.SplitHostPort(addr)
+		port := 0
+		for _, ch := range portStr {
+			port = port*10 + int(ch-'0')
+		}
+		return port
+	}
+
+	p1 := findFreePort()
+	p2 := findFreePort()
+	for p2 == p1 {
+		p2 = findFreePort()
+	}
+
 	services := []ServiceConfig{
-		{Name: "HTTP", Port: 51080},
-		{Name: "MySQL", Port: 51306},
+		{Name: "HTTP", Port: p1},
+		{Name: "MySQL", Port: p2},
 	}
 
 	result, err := CheckServicePorts(services)
@@ -82,7 +103,7 @@ func TestCheckServicePorts_AllAvailable(t *testing.T) {
 	}
 
 	if len(result.Available) != 2 {
-		t.Errorf("expected 2 available services, got %d: %v", len(result.Available), result.Available)
+		t.Errorf("expected 2 available services, got %d: %v (ports: %d, %d)", len(result.Available), result.Available, p1, p2)
 	}
 	if len(result.Conflicted) != 0 {
 		t.Errorf("expected 0 conflicted, got %d", len(result.Conflicted))

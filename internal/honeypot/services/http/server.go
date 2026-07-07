@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"math/rand"
 	"net"
 	"net/textproto"
@@ -698,7 +699,7 @@ func (s *Server) renderPage(path string) string {
 %s
 <script>%s</script>
 </body>
-</html>`, s.fakeRobotsTxt(), s.fingerprintJS, path, breadcrumbLinks, baitLinks, s.fingerprintJS)
+</html>`, s.fakeRobotsTxt(), s.fingerprintJS, html.EscapeString(path), breadcrumbLinks, baitLinks, s.fingerprintJS)
 }
 
 // buildBaitLinks 生成隐藏在 HTML 中的蜜标下载链接
@@ -775,7 +776,7 @@ function handleLogin(){var e=document.getElementById("error");e.style.display="b
 }
 
 func (s *Server) fakeAPIResponse(path string) string {
-	return fmt.Sprintf(`{"status":"ok","path":"%s","version":"2.0.1","timestamp":"%s","internal_ip":"10.0.1.100"}`, path, time.Now().Format(time.RFC3339))
+	return fmt.Sprintf(`{"status":"ok","path":"%s","version":"2.0.1","timestamp":"%s","internal_ip":"10.0.1.100"}`, html.EscapeString(path), time.Now().Format(time.RFC3339))
 }
 
 // fakeActuatorResponse 伪造 Spring Boot Actuator 未授权访问响应
@@ -1188,7 +1189,7 @@ func (s *Server) fakeDirListing(path string) string {
 </table>
 <address>Apache/2.4.57 (Ubuntu) Server at localhost Port 80</address>
 </body>
-</html>`, path, path, rows)
+</html>`, html.EscapeString(path), html.EscapeString(path), rows)
 }
 
 func (s *Server) fakeSessionID() string {

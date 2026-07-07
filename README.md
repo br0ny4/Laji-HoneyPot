@@ -9,11 +9,11 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go" alt="Go" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
-                  <!-- BEGIN-AUTO:TESTS -->
+                    <!-- BEGIN-AUTO:TESTS -->
   <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-30%2F30%20PASS-brightgreen" alt="Tests" /></a>
   <!-- END-AUTO:TESTS -->
-                  <!-- BEGIN-AUTO:VERSION -->
-  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.18.0-blue" alt="Version" /></a>
+                    <!-- BEGIN-AUTO:VERSION -->
+  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.18.1-blue" alt="Version" /></a>
   <!-- END-AUTO:VERSION -->
 </p>
 
@@ -33,7 +33,6 @@
 - [漏洞库](#漏洞库)
 - [项目架构](#项目架构)
 - [本地开发环境](#本地开发环境)
-- [Chrome 浏览器调试](#chrome-浏览器调试)
 - [开发路线图](#开发路线图)
 - [同类对比](#同类对比)
 - [致谢](#致谢)
@@ -600,7 +599,6 @@ Laji-HoneyPot/
 | Node.js | 18+ | 前端构建 (`npm run build`) |
 | npm | 9+ | 前端依赖管理 |
 | Git | 任意 | 版本控制 |
-| Chrome | 120+ | 浏览器调试（DevTools） |
 
 ### 开发模式启动
 
@@ -676,55 +674,6 @@ cd web && npm run lint            # ESLint 检查
 
 ---
 
-## Chrome 浏览器调试
-
-本节介绍如何在本地开发环境中借助 Chrome DevTools 进行前端 UI 开发与调试。
-
-### Chrome DevTools 调试流程
-
-1. **启动开发环境**
-   ```bash
-   # 终端 1: 后端
-   go run ./cmd/honeypot
-   # 终端 2: 前端 (Vite HMR)
-   cd web && npm run dev
-   ```
-
-2. **打开 Chrome 并导航到开发页面**
-   - 打开 Chrome 浏览器
-   - 访问 `http://127.0.0.1:3000`
-   - 按 `F12` 或 `Cmd+Option+I` 打开 DevTools
-
-3. **实时预览与调试**
-   - **Elements 面板**：检查 DOM 结构和 CSS 样式
-   - **Console 面板**：查看日志输出、API 请求结果
-   - **Network 面板**：监控 API 请求/响应（过滤 `/api/`）
-   - **Application 面板**：检查 localState、IndexedDB
-   - **Performance 面板**：录制页面加载性能
-
-4. **前端热重载验证**
-   - 修改 `web/src/` 下的任意 `tsx` 或 `css` 文件
-   - 保存后浏览器自动刷新（HMR 热更新）
-   - DevTools 中的修改可立即预览
-
-5. **验证 API 连通性**
-   - 打开前端页面底部的状态栏
-   - 检查 "API" 指示灯为绿色 → 后端连通
-   - 检查 "SSE" 指示灯为绿色 → 实时推送连通
-   - 点击状态栏展开查看最近 50 条请求日志
-
-### 常见调试场景
-
-| 场景 | DevTools 操作 |
-|------|-------------|
-| 新 Tab 功能正常 | Console 中无报错，Network 中对应 API 返回 200 |
-| 样式异常 | Elements → 选中元素 → Styles 面板排查 CSS |
-| API 请求慢 | Network → 查看请求耗时 → 后端优化 |
-| 数据不刷新 | 检查 SSE 连接状态 → Console 中查看 EventSource 日志 |
-| 前端构建失败 | Terminal 中 `cd web && npm run build` 查看错误详情 |
-
----
-
 ## 开发路线图
 
 - [x] 蜜饵投放系统 — 7 类虚假凭证诱饵 + 访问追踪 + HTTP 蜜罐自动注入（v0.16.0）
@@ -771,7 +720,6 @@ cd web && npm run lint            # ESLint 检查
   - CLI 命令 / Bash 脚本 / Docker 命令三模式输出
   - Agent 部署面板：场景选配 + 配置预览 + 一键复制
 - [x] 前端 API 认证修复 — 生产模式 SPA 路由豁免（v0.10.2）
-- [x] 开发体验优化 — Vite /healthz 代理 + Chrome DevTools 调试指南（v0.10.2）
 - [x] 深度反制系统 v2.0 — 屏幕截获/文件扫描/网络探测三层植入体（v0.11.0）
 - [x] 反制得分体系 + 冷却防刷 + SHA256 合规审计（v0.11.0）
 - [x] C2 数据外传 API — Image Beacon 分片重组 + JSON 双模式（v0.11.0）

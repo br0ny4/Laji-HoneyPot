@@ -108,7 +108,7 @@ func Save(cfg *Config, paths ...string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0644)
+	return os.WriteFile(p, data, 0600)
 }
 
 // Get 从 Section 中安全获取字符串值
