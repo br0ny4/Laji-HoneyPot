@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
+	"github.com/Laji-HoneyPot/honeypot/internal/ops/daemon"
+	"github.com/Laji-HoneyPot/honeypot/internal/ops/upgrade"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/countermeasure"
 	"github.com/Laji-HoneyPot/honeypot/internal/traceability/vulndb"
@@ -46,16 +49,18 @@ type Server struct {
 	auditChain      *AuditChain  // 不可篡改审计链
 	authManager     *AuthManager // JWT 认证管理器
 	profileEngine   *profile.Engine
-	profileBuilder  *profile.Builder     // 攻击者画像构建器
-	clusterMgr      *cluster.Manager     // 集群管理端 (可选)
-	clusterGen      *cluster.Generator   // Agent 生成引擎 (可选)
-	clusterCompiler *cluster.Compiler    // Agent 编译引擎 (v0.17.2)
-	trapConfigData  []byte               // 陷阱配置 JSON 缓存（启动时写入，只读）
-	traceEngine     *traceability.Engine // 溯源反制引擎（深度反制API）
-	hpEngine        *honeypot.Engine     // 蜜罐引擎（服务状态查询）
-	baitGen         *bait.Generator      // 蜜标生成器
-	baitTracker     *bait.Tracker        // 蜜标访问追踪器
-	baitLinkage     *bait.LinkageEngine  // 蜜饵联动引擎
+	profileBuilder  *profile.Builder        // 攻击者画像构建器
+	clusterMgr      *cluster.Manager        // 集群管理端 (可选)
+	clusterGen      *cluster.Generator      // Agent 生成引擎 (可选)
+	clusterCompiler *cluster.Compiler       // Agent 编译引擎 (v0.17.2)
+	upgradeMgr      *upgrade.UpgradeManager // 升级管理 (v0.18.1)
+	daemonMgr       *daemon.DaemonManager   // 守护进程管理 (v0.18.1)
+	trapConfigData  []byte                  // 陷阱配置 JSON 缓存（启动时写入，只读）
+	traceEngine     *traceability.Engine    // 溯源反制引擎（深度反制API）
+	hpEngine        *honeypot.Engine        // 蜜罐引擎（服务状态查询）
+	baitGen         *bait.Generator         // 蜜标生成器
+	baitTracker     *bait.Tracker           // 蜜标访问追踪器
+	baitLinkage     *bait.LinkageEngine     // 蜜饵联动引擎
 	mux             *http.ServeMux
 	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
 	startTime       time.Time
@@ -156,6 +161,16 @@ func (s *Server) SetBaitSystem(gen *bait.Generator, tracker *bait.Tracker) {
 // SetBaitLinkage 注入蜜饵联动引擎（由 main 注入）
 func (s *Server) SetBaitLinkage(linkage *bait.LinkageEngine) {
 	s.baitLinkage = linkage
+}
+
+// SetUpgradeManager 注入升级管理器（由 main 注入）
+func (s *Server) SetUpgradeManager(mgr *upgrade.UpgradeManager) {
+	s.upgradeMgr = mgr
+}
+
+// SetDaemonManager 注入守护进程管理器（由 main 注入）
+func (s *Server) SetDaemonManager(mgr *daemon.DaemonManager) {
+	s.daemonMgr = mgr
 }
 
 // SetProfileBuilder 设置攻击者画像构建器（由 main 注入）
@@ -273,6 +288,15 @@ func (s *Server) registerRoutes() {
 	// 蜜饵联动
 	s.mux.HandleFunc("/api/bait/linkages", s.handleBaitLinkages)
 	s.mux.HandleFunc("/api/bait/linkages/stats", s.handleBaitLinkageStats)
+
+	// 升级管理 (Manager only) — v0.18.1
+	s.mux.HandleFunc("/api/upgrade/jobs", s.handleUpgradeJobs)
+	s.mux.HandleFunc("/api/upgrade/jobs/", s.handleUpgradeJobByID)
+	s.mux.HandleFunc("/api/upgrade/generate", s.handleUpgradeGenerate)
+
+	// 守护进程管理 — v0.18.1
+	s.mux.HandleFunc("/api/agent/daemon/status", s.handleAgentDaemonStatus)
+	s.mux.HandleFunc("/api/agent/daemon/control", s.handleAgentDaemonControl)
 
 	// 前端 SPA 静态文件服务（由 go:embed 嵌入 web/dist/）
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -1986,6 +2010,237 @@ func (s *Server) handleBaitLinkageStats(w http.ResponseWriter, r *http.Request) 
 	}
 	stats := s.baitLinkage.Stats()
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// ============================================================
+// 升级管理 API
+// ============================================================
+
+// handleUpgradeJobs handles GET (list) and POST (create) for upgrade jobs.
+func (s *Server) handleUpgradeJobs(w http.ResponseWriter, r *http.Request) {
+	if s.upgradeMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "upgrade manager not available"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		nodeID := r.URL.Query().Get("node_id")
+		jobs, err := s.upgradeMgr.ListJobs(nodeID)
+		if err != nil {
+			s.logger.Errorw("list upgrade jobs failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if jobs == nil {
+			jobs = []*store.UpgradeJob{}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"total": len(jobs),
+			"jobs":  jobs,
+		})
+
+	case http.MethodPost:
+		var req struct {
+			NodeID      string `json:"node_id"`
+			Version     string `json:"version"`
+			PackageURL  string `json:"package_url,omitempty"`
+			PackageHash string `json:"package_hash,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if req.NodeID == "" || req.Version == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node_id and version are required"})
+			return
+		}
+
+		job, err := s.upgradeMgr.CreateUpgradeJob(req.NodeID, req.Version, req.PackageURL, req.PackageHash)
+		if err != nil {
+			s.logger.Errorw("create upgrade job failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, job)
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// handleUpgradeJobByID handles GET (status), POST (progress update), and DELETE (cancel) for a single job.
+func (s *Server) handleUpgradeJobByID(w http.ResponseWriter, r *http.Request) {
+	if s.upgradeMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "upgrade manager not available"})
+		return
+	}
+
+	// Extract job ID from path: /api/upgrade/jobs/{jobID}
+	path := strings.TrimPrefix(r.URL.Path, "/api/upgrade/jobs/")
+	jobID := strings.SplitN(path, "/", 2)[0]
+	if jobID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "job_id required"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		job, err := s.upgradeMgr.GetJobStatus(jobID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
+
+	case http.MethodPost:
+		// Progress update from agent
+		var req struct {
+			Progress float64 `json:"progress"`
+			Status   string  `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if err := s.upgradeMgr.NotifyProgress(jobID, req.Progress, req.Status); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+
+	case http.MethodDelete:
+		if err := s.upgradeMgr.CancelJob(jobID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// handleUpgradeGenerate handles POST to generate an upgrade package.
+func (s *Server) handleUpgradeGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+
+	if s.upgradeMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "upgrade manager not available"})
+		return
+	}
+
+	var req struct {
+		TargetOS   string `json:"target_os"`
+		TargetArch string `json:"target_arch"`
+		Version    string `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.TargetOS == "" {
+		req.TargetOS = "linux"
+	}
+	if req.TargetArch == "" {
+		req.TargetArch = "amd64"
+	}
+	if req.Version == "" {
+		req.Version = core.Version
+	}
+
+	pkgPath, sha256Hash, err := s.upgradeMgr.GeneratePackage(req.TargetOS, req.TargetArch, req.Version)
+	if err != nil {
+		s.logger.Errorw("generate upgrade package failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Serve the package file for download
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(pkgPath)))
+	http.ServeFile(w, r, pkgPath)
+
+	s.logger.Infow("upgrade package served",
+		"path", pkgPath,
+		"sha256", sha256Hash,
+	)
+}
+
+// ============================================================
+// 守护进程管理 API
+// ============================================================
+
+// handleAgentDaemonStatus returns the current daemon service status.
+func (s *Server) handleAgentDaemonStatus(w http.ResponseWriter, r *http.Request) {
+	if s.daemonMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "daemon manager not available"})
+		return
+	}
+
+	status, err := s.daemonMgr.Status()
+	installed := s.daemonMgr.IsInstalled()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":    status,
+		"installed": installed,
+		"service":   s.daemonMgr.ServiceName(),
+		"error": func() string {
+			if err != nil {
+				return err.Error()
+			} else {
+				return ""
+			}
+		}(),
+	})
+}
+
+// handleAgentDaemonControl handles daemon control actions (start/stop/restart).
+func (s *Server) handleAgentDaemonControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+
+	if s.daemonMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "daemon manager not available"})
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	var err error
+	switch req.Action {
+	case "start":
+		err = s.daemonMgr.Start()
+	case "stop":
+		err = s.daemonMgr.Stop()
+	case "restart":
+		err = s.daemonMgr.Restart()
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid action, must be start/stop/restart"})
+		return
+	}
+
+	if err != nil {
+		s.logger.Errorw("daemon control failed", "action", req.Action, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	s.logger.Infow("daemon control executed", "action", req.Action)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
 }
 
 // requestLogMiddleware 记录每个 HTTP 请求的方法、路径、状态码和耗时

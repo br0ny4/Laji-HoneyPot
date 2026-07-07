@@ -105,13 +105,37 @@ type ConfigSync struct {
 	Entries map[string]string `json:"entries"` // 配置键值对
 }
 
+// ---------- 升级相关消息 ----------
+
+// UpgradeDispatchMsg 管理端下发升级指令
+type UpgradeDispatchMsg struct {
+	Version     string `json:"version"`
+	URL         string `json:"url"`
+	Checksum    string `json:"checksum"`
+	Size        int64  `json:"size"`
+	MinVersion  string `json:"min_version"`
+	ForceUpdate bool   `json:"force_update"`
+}
+
+// UpgradeResultMsg 节点上报升级结果
+type UpgradeResultMsg struct {
+	Success       bool   `json:"success"`
+	Version       string `json:"version"`
+	Error         string `json:"error,omitempty"`
+	DurationMs    int64  `json:"duration_ms"`
+	OldVersion    string `json:"old_version,omitempty"`
+	RolledBack    bool   `json:"rolled_back,omitempty"`
+}
+
 // ---------- 常量 ----------
 
 const (
-	MsgTypeRegister   = "register"
-	MsgTypeHeartbeat  = "heartbeat"
-	MsgTypeEventPush  = "event_push"
-	MsgTypeConfigSync = "config_sync"
+	MsgTypeRegister        = "register"
+	MsgTypeHeartbeat       = "heartbeat"
+	MsgTypeEventPush       = "event_push"
+	MsgTypeConfigSync      = "config_sync"
+	MsgTypeUpgradeDispatch = "upgrade_dispatch"
+	MsgTypeUpgradeResult   = "upgrade_result"
 
 	DefaultHeartbeatSec = 30
 	DefaultClusterPort  = 8443 // 管理端 gRPC/Cluster 端口

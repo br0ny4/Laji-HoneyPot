@@ -35,10 +35,18 @@ import (
 	honeypotEngine "github.com/Laji-HoneyPot/honeypot/internal/honeypot"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	opsEngine "github.com/Laji-HoneyPot/honeypot/internal/ops"
+	"github.com/Laji-HoneyPot/honeypot/internal/ops/daemon"
+	"github.com/Laji-HoneyPot/honeypot/internal/ops/upgrade"
 	traceEngine "github.com/Laji-HoneyPot/honeypot/internal/traceability"
 )
 
 func main() {
+	// Handle subcommands: honeypot agent daemon <install|uninstall|start|stop|restart|status>
+	if len(os.Args) >= 3 && os.Args[1] == "agent" && os.Args[2] == "daemon" {
+		handleAgentDaemon()
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
@@ -248,6 +256,18 @@ func main() {
 	apiSrv.SetClusterCompiler(clusterCompiler)
 	logger.Info("agent compiler initialized")
 
+	// v0.18.1: 升级管理器 — 生成升级包、管理升级任务
+	upgradeMgr := upgrade.NewUpgradeManager(st, logger, cfg.DataDir)
+	apiSrv.SetUpgradeManager(upgradeMgr)
+	logger.Info("upgrade manager initialized")
+
+	// v0.18.1: 守护进程管理器 — Agent 服务管理
+	binPath, _ := os.Executable()
+	configPath := "config.yaml"
+	daemonMgr := daemon.NewDaemonManager(binPath, configPath, cfg.DataDir, logger)
+	apiSrv.SetDaemonManager(daemonMgr)
+	logger.Info("daemon manager initialized")
+
 	if cfg.Cluster.Enabled && cfg.Cluster.Role == "manager" {
 		tlsCfg, tlsErr := buildClusterTLS(cfg.Cluster, logger)
 		if tlsErr != nil {
@@ -389,4 +409,99 @@ func buildTrapConfigJSON(reg *traps.Registry) []byte {
 		"all_services":     traps.AllServices,
 	})
 	return data
+}
+
+// handleAgentDaemon handles the "agent daemon" subcommands.
+// Usage: honeypot agent daemon <install|uninstall|start|stop|restart|status>
+func handleAgentDaemon() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Usage: %s agent daemon <install|uninstall|start|stop|restart|status>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	action := os.Args[3]
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger := log.New(cfg.LogLevel)
+
+	// Determine binary path
+	binPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to get executable path: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Determine config path
+	configPath := "config.yaml"
+	for i := 4; i < len(os.Args); i++ {
+		if os.Args[i] == "--config" && i+1 < len(os.Args) {
+			configPath = os.Args[i+1]
+			i++
+		}
+	}
+
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = "data"
+	}
+
+	mgr := daemon.NewDaemonManager(binPath, configPath, dataDir, logger)
+
+	var actionErr error
+	switch action {
+	case "install":
+		fmt.Printf("Installing Laji-HoneyPot Agent daemon...\n")
+		actionErr = mgr.Install()
+		if actionErr == nil {
+			fmt.Printf("Daemon installed successfully.\n")
+		}
+	case "uninstall":
+		fmt.Printf("Uninstalling Laji-HoneyPot Agent daemon...\n")
+		actionErr = mgr.Uninstall()
+		if actionErr == nil {
+			fmt.Printf("Daemon uninstalled successfully.\n")
+		}
+	case "start":
+		actionErr = mgr.Start()
+		if actionErr == nil {
+			fmt.Printf("Daemon started.\n")
+		}
+	case "stop":
+		actionErr = mgr.Stop()
+		if actionErr == nil {
+			fmt.Printf("Daemon stopped.\n")
+		}
+	case "restart":
+		actionErr = mgr.Restart()
+		if actionErr == nil {
+			fmt.Printf("Daemon restarted.\n")
+		}
+	case "status":
+		status, err := mgr.Status()
+		if err != nil {
+			fmt.Printf("Status: %s (error: %v)\n", status, err)
+		} else {
+			fmt.Printf("Status: %s\n", status)
+		}
+		if mgr.IsInstalled() {
+			fmt.Println("Service is installed.")
+		} else {
+			fmt.Println("Service is NOT installed.")
+		}
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown action: %s\n", action)
+		fmt.Fprintf(os.Stderr, "Usage: %s agent daemon <install|uninstall|start|stop|restart|status>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	if actionErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", actionErr)
+		os.Exit(1)
+	}
 }

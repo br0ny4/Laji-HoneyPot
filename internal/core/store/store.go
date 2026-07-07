@@ -238,6 +238,22 @@ func (s *Store) migrate() error {
 		locked_until DATETIME
 	);
 	CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+	-- 升级管理 — 升级任务表
+	CREATE TABLE IF NOT EXISTS upgrade_jobs (
+		id TEXT PRIMARY KEY,
+		version TEXT NOT NULL,
+		status TEXT DEFAULT 'pending',
+		node_id TEXT NOT NULL,
+		package_url TEXT,
+		package_hash TEXT,
+		progress REAL DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		completed_at DATETIME,
+		error TEXT
+	);
+	CREATE INDEX IF NOT EXISTS idx_upgrade_jobs_node ON upgrade_jobs(node_id);
+	CREATE INDEX IF NOT EXISTS idx_upgrade_jobs_status ON upgrade_jobs(status);
 	`
 	_, err := s.db.Exec(ddl)
 	if err != nil {
@@ -1122,6 +1138,118 @@ func (s *Store) GetPortScans(limit int) ([]PortScanEvent, error) {
 		events = append(events, e)
 	}
 	return events, rows.Err()
+}
+
+// ============================================================
+// 升级管理 — UpgradeJob store methods
+// ============================================================
+
+// UpgradeJob represents an upgrade task stored in the database.
+type UpgradeJob struct {
+	ID          string  `json:"id"`
+	Version     string  `json:"version"`
+	Status      string  `json:"status"`
+	NodeID      string  `json:"node_id"`
+	PackageURL  string  `json:"package_url"`
+	PackageHash string  `json:"package_hash"`
+	Progress    float64 `json:"progress"`
+	CreatedAt   string  `json:"created_at"`
+	CompletedAt string  `json:"completed_at,omitempty"`
+	Error       string  `json:"error,omitempty"`
+}
+
+// CreateUpgradeJob inserts a new upgrade job into the database.
+func (s *Store) CreateUpgradeJob(job *UpgradeJob) error {
+	_, err := s.db.Exec(
+		`INSERT INTO upgrade_jobs (id, version, status, node_id, package_url, package_hash, progress, created_at, completed_at, error)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
+		job.ID, job.Version, job.Status, job.NodeID, job.PackageURL, job.PackageHash,
+		job.Progress, job.CreatedAt, job.CompletedAt, job.Error,
+	)
+	return err
+}
+
+// GetUpgradeJob retrieves a single upgrade job by ID.
+func (s *Store) GetUpgradeJob(id string) (*UpgradeJob, error) {
+	var j UpgradeJob
+	var completedAt, errMsg sql.NullString
+
+	err := s.db.QueryRow(
+		`SELECT id, version, status, node_id, package_url, package_hash, progress, created_at, completed_at, error
+		 FROM upgrade_jobs WHERE id = ?`, id,
+	).Scan(&j.ID, &j.Version, &j.Status, &j.NodeID, &j.PackageURL, &j.PackageHash,
+		&j.Progress, &j.CreatedAt, &completedAt, &errMsg)
+	if err != nil {
+		return nil, err
+	}
+	if completedAt.Valid {
+		j.CompletedAt = completedAt.String
+	}
+	if errMsg.Valid {
+		j.Error = errMsg.String
+	}
+	return &j, nil
+}
+
+// ListUpgradeJobs lists upgrade jobs, optionally filtered by node ID.
+func (s *Store) ListUpgradeJobs(nodeID string) ([]*UpgradeJob, error) {
+	var rows *sql.Rows
+	var err error
+
+	if nodeID != "" {
+		rows, err = s.db.Query(
+			`SELECT id, version, status, node_id, package_url, package_hash, progress, created_at, completed_at, error
+			 FROM upgrade_jobs WHERE node_id = ? ORDER BY created_at DESC`, nodeID)
+	} else {
+		rows, err = s.db.Query(
+			`SELECT id, version, status, node_id, package_url, package_hash, progress, created_at, completed_at, error
+			 FROM upgrade_jobs ORDER BY created_at DESC`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*UpgradeJob
+	for rows.Next() {
+		var j UpgradeJob
+		var completedAt, errMsg sql.NullString
+		if err := rows.Scan(&j.ID, &j.Version, &j.Status, &j.NodeID, &j.PackageURL, &j.PackageHash,
+			&j.Progress, &j.CreatedAt, &completedAt, &errMsg); err != nil {
+			continue
+		}
+		if completedAt.Valid {
+			j.CompletedAt = completedAt.String
+		}
+		if errMsg.Valid {
+			j.Error = errMsg.String
+		}
+		jobs = append(jobs, &j)
+	}
+	return jobs, rows.Err()
+}
+
+// UpdateUpgradeJobStatus updates the status, progress, and error of an upgrade job.
+func (s *Store) UpdateUpgradeJobStatus(id string, status string, progress float64, errMsg string) error {
+	if status == "complete" || status == "failed" || status == "cancelled" {
+		_, err := s.db.Exec(
+			`UPDATE upgrade_jobs SET status = ?, progress = ?, completed_at = CURRENT_TIMESTAMP, error = NULLIF(?, '')
+			 WHERE id = ?`,
+			status, progress, errMsg, id,
+		)
+		return err
+	}
+	_, err := s.db.Exec(
+		`UPDATE upgrade_jobs SET status = ?, progress = ?, error = NULLIF(?, '') WHERE id = ?`,
+		status, progress, errMsg, id,
+	)
+	return err
+}
+
+// DeleteUpgradeJob deletes an upgrade job by ID.
+func (s *Store) DeleteUpgradeJob(id string) error {
+	_, err := s.db.Exec("DELETE FROM upgrade_jobs WHERE id = ?", id)
+	return err
 }
 
 // Close 关闭数据库连接
