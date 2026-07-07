@@ -386,7 +386,7 @@ func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config,
 		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		IPAddresses:  getLocalIPs(), // v0.19.0: 包含所有本地网卡IP，支持外部Agent连接
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -510,4 +510,33 @@ func handleAgentDaemon() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", actionErr)
 		os.Exit(1)
 	}
+}
+
+// getLocalIPs 获取本机所有网卡 IP（含 127.0.0.1，用于 TLS 证书 SAN）
+func getLocalIPs() []net.IP {
+	var ips []net.IP
+	ips = append(ips, net.ParseIP("127.0.0.1"))
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ips
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				ip := ipNet.IP
+				if ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+					continue
+				}
+				if ip4 := ip.To4(); ip4 != nil {
+					ips = append(ips, ip4)
+				}
+			}
+		}
+	}
+	return ips
 }
