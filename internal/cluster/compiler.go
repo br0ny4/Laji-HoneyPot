@@ -680,12 +680,12 @@ func (c *Compiler) buildDeployCommands(req AgentDeployRequest, binaryName, packa
 			},
 			{
 				Step: 3, Title: "以管理员权限运行部署脚本",
-				Command: `powershell -ExecutionPolicy Bypass -File .\honeypot-agent\deploy.ps1`,
+				Command:     `powershell -ExecutionPolicy Bypass -File .\honeypot-agent\deploy.ps1`,
 				Description: "部署脚本自动完成: 安装文件 → 注册 Windows 服务 → 配置开机自启 → 启动 Agent",
 			},
 			{
 				Step: 4, Title: "验证 Agent 运行状态",
-				Command: `sc.exe query HoneypotAgent`,
+				Command:     `sc.exe query HoneypotAgent`,
 				Description: "确认服务状态为 RUNNING",
 			},
 		}
@@ -701,12 +701,12 @@ func (c *Compiler) buildDeployCommands(req AgentDeployRequest, binaryName, packa
 		},
 		{
 			Step: 2, Title: "解压部署包",
-			Command: fmt.Sprintf(`tar xzf %s -C ./honeypot-agent/`, packageName),
+			Command:     fmt.Sprintf(`mkdir -p ./honeypot-agent/ && tar xzf %s -C ./honeypot-agent/`, packageName),
 			Description: "解压到 ./honeypot-agent/ 目录",
 		},
 		{
 			Step: 3, Title: "以 root 权限运行部署脚本",
-			Command: `sudo bash ./honeypot-agent/deploy.sh`,
+			Command:     `sudo bash ./honeypot-agent/deploy.sh`,
 			Description: "部署脚本自动完成: 安装文件 → 注册 systemd 服务 → 配置开机自启 → 启动 Agent。目标机器仅需 bash 和 systemd（Linux 标准组件），无需任何额外依赖。",
 		},
 		{
