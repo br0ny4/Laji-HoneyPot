@@ -2,6 +2,11 @@
 # ============================================================
 # Laji-HoneyPot 管理端运维工具 v0.19.0
 # 用法: ./honeypot-ctl {start|stop|restart|status|update|logs|build|clean|password|help}
+#
+# 首次启动: 自动生成16位+强密码 (大小写字母+数字+特殊字符, bcrypt 12轮)
+#           密码通过 stderr 无缓冲写入日志，ctl 轮询检测最多等待15秒
+#           使用 ./honeypot-ctl password 随时查看
+#           忘记密码: sed -i '' '/admin_password_hash/d' config.yaml && ./honeypot-ctl restart
 # ============================================================
 set -euo pipefail
 
@@ -211,35 +216,52 @@ cmd_start() {
     local pid=$!
     echo "$pid" > "$PID_FILE"
 
-    # 等待启动
+    # 等待启动（进程存活确认）
     sleep 2
-    if kill -0 "$pid" 2>/dev/null; then
-        log_info "服务启动成功 (PID: $pid)"
-        echo "  API 地址:   $API_URL"
-        echo "  日志文件:   $LOG_FILE"
-        echo "  查看状态:   $0 status"
-        echo "  查看日志:   $0 logs"
-
-        # 首次运行：从日志中提取初始密码
-        if [ "$first_run" = true ]; then
-            # 再等 1 秒确保密码写入日志
-            sleep 1
-            echo ""
-            if grep -A 20 '管理端初始密码' "$LOG_FILE" 2>/dev/null | head -20; then
-                echo ""
-                log_warn "⚠️  以上为首次启动自动生成的强密码，请立即登录修改！"
-                echo "  此后密码不再显示，如需再次查看请执行: $0 password"
-            else
-                log_warn "首次运行已生成强密码，请查看日志文件获取初始密码:"
-                echo "  tail -30 $LOG_FILE"
-                echo ""
-                echo "  或执行: $0 password"
-            fi
-        fi
-    else
+    if ! kill -0 "$pid" 2>/dev/null; then
         log_error "服务启动失败，请查看日志: $LOG_FILE"
         rm -f "$PID_FILE"
         return 1
+    fi
+
+    log_info "服务启动成功 (PID: $pid)"
+    echo "  API 地址:   $API_URL"
+    echo "  日志文件:   $LOG_FILE"
+    echo "  查看状态:   $0 status"
+    echo "  查看日志:   $0 logs"
+
+    # 首次运行：轮询等待密码写入日志（Go 初始化链路过长，固定等待不可靠）
+    if [ "$first_run" = true ]; then
+        echo ""
+        log_info "首次运行，正在生成管理员强密码..."
+        local pw_waited=0
+        local pw_found=false
+        while [ $pw_waited -lt 15 ]; do
+            if grep -q '管理端初始密码' "$LOG_FILE" 2>/dev/null; then
+                pw_found=true
+                break
+            fi
+            sleep 1
+            pw_waited=$((pw_waited + 1))
+            # 每秒显示点，让用户知道在等待
+            echo -n "."
+        done
+        echo ""
+
+        if [ "$pw_found" = true ]; then
+            echo ""
+            grep -A 20 '管理端初始密码' "$LOG_FILE" 2>/dev/null | head -20
+            echo ""
+            log_warn "⚠️  以上为首次启动自动生成的强密码，请立即登录修改！"
+            echo "  此后密码不再显示，如需再次查看请执行: $0 password"
+        else
+            # 密码没在15秒内生成，可能服务已崩溃或初始化失败
+            log_warn "密码生成超时（已等待 ${pw_waited}s），请检查服务状态: $0 status"
+            echo "  或稍后查看日志获取密码: tail -30 $LOG_FILE"
+            echo ""
+            echo "  如日志中确实没有，可能是 config.yaml 已有旧密码哈希"
+            echo "  一键重置: sed -i '' '/admin_password_hash/d' $PROJECT_ROOT/config.yaml && $0 restart"
+        fi
     fi
 }
 
@@ -306,7 +328,7 @@ cmd_status() {
     mem=$(ps -o rss= -p "$pid" 2>/dev/null | xargs)
     if [ -n "$mem" ]; then
         local mem_mb
-        mem_mb=$(echo "scale=1; $mem / 1024" | bc 2>/dev/null || echo "$mem")
+        mem_mb=$(echo "scale=1; $mem / 1024" | bc 2>/dev/null || awk "BEGIN {printf \"%.1f\", $mem/1024}" 2>/dev/null || echo "$mem")
         echo "  内存:     ${mem_mb}MB"
     fi
 
@@ -497,15 +519,29 @@ cmd_help() {
     echo ""
     echo "命令:"
     echo "  start     编译并启动 honeypot 服务"
-    echo "  stop      停止 honeypot 服务"
-    echo "  restart   重启 honeypot 服务"
-    echo "  status    查看服务运行状态、API 健康检查、蜜罐服务状态"
-    echo "  update    一键更新: git pull -> clean -> build -> 重启"
+    echo "            首次启动自动生成16位+强密码 (大小写字母+数字+特殊字符)"
+    echo "            bcrypt 12轮哈希加密，密码明文仅在首次启动时显示，绝不存储"
+    echo "            密码通过 stderr 无缓冲写入日志，ctl 轮询检测最多等待15秒"
+    echo "  stop      停止 honeypot 服务 (SIGTERM → 10s优雅等待 → SIGKILL)"
+    echo "  restart   重启 honeypot 服务 (stop → start)"
+    echo "  status    查看服务运行状态、PID、运行时长、内存用量"
+    echo "            API 健康检查 (/healthz)、蜜罐服务状态 (/api/services/status)"
+    echo "  update    一键版本更新: git pull → clean → build → 重启"
+    echo "            先尝试 fast-forward，失败则强制同步 (reset --hard)"
+    echo "            自动检测前端变更并重新构建"
     echo "  logs [N]  查看最近 N 行日志 (默认 50)"
     echo "  build     编译二进制 (自动删除旧产物, 覆盖写入 bin/honeypot)"
-    echo "  clean     清理所有编译产物、构建缓存、部署包临时文件"
+    echo "  clean     清理所有编译产物、构建缓存、部署包临时文件、PID文件"
     echo "  password  查看首次启动自动生成的初始强密码"
-    echo "  help      显示帮助信息"
+    echo "            搜索所有日志文件 (含轮转日志 honeypot.log.*)"
+    echo "            找不到时给出密码重置指引和一键重置命令"
+    echo "  help      显示此帮助信息"
+    echo ""
+    echo "密码管理:"
+    echo "  查看密码:    $0 password"
+    echo "  修改密码:    登录管理端 → 右上角「修改密码」按钮"
+    echo "  重置密码:    sed -i '' '/admin_password_hash/d' config.yaml && $0 restart"
+    echo "  密码强度:    ≥16位, 含大小写字母+数字+特殊字符, bcrypt 12轮"
     echo ""
     echo "环境变量:"
     echo "  API_ADDR  API 监听地址 (默认: 127.0.0.1:8080)"
@@ -516,12 +552,17 @@ cmd_help() {
     echo "  配置:       $PROJECT_ROOT/config.yaml"
     echo "  二进制:     $BINARY"
     echo ""
-    echo "测试:"
+    echo "测试与验证:"
     echo "  全量测试:   bash scripts/full-test.sh"
     echo "  快速验证:   bash deploy/quick-verify.sh"
     echo ""
+    echo "Agent 管理 (需在管理端 UI 操作):"
+    echo "  部署 Agent:  管理端 → Agent部署 标签"
+    echo "  升级 Agent:  管理端 → Agent升级 标签 (支持断点续传/回滚)"
+    echo "  守护进程:    管理端 → 集群管理 → 每节点操作列 (启动/停止/重启)"
+    echo ""
     echo "示例:"
-    echo "  $0 start                    # 编译 + 启动"
+    echo "  $0 start                    # 编译 + 启动 (首次运行自动生成密码)"
     echo "  $0 build                    # 仅编译 (覆盖旧产物)"
     echo "  $0 clean                    # 清理所有产物"
     echo "  $0 status                   # 查看运行状态"
