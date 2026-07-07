@@ -203,18 +203,24 @@ func main() {
 			logger.Warnw("failed to save admin password hash to config.yaml", "error", err)
 		}
 
-		// 终端安全输出：仅在首次启动时打印
-		fmt.Println("")
-		fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-		fmt.Println("║  🔐 Laji-HoneyPot 管理端初始密码                              ║")
-		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
-		fmt.Printf("║  用户名: admin                                               ║\n")
-		fmt.Printf("║  密  码: %-52s ║\n", plainPassword)
-		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
-		fmt.Println("║  ⚠️  请立即登录并修改初始密码！                              ║")
-		fmt.Println("║  ⚠️  此密码仅在本次启动时显示一次，请妥善保管！             ║")
-		fmt.Println("╚══════════════════════════════════════════════════════════════╝")
-		fmt.Println("")
+		// 终端安全输出：仅在首次启动时打印（同时写 stdout 和 stderr，stderr 无缓冲确保立即写入）
+		bannerLines := []string{
+			"",
+			"╔══════════════════════════════════════════════════════════════╗",
+			"║  🔐 Laji-HoneyPot 管理端初始密码                              ║",
+			"╠══════════════════════════════════════════════════════════════╣",
+			fmt.Sprintf("║  用户名: admin                                               ║"),
+			fmt.Sprintf("║  密  码: %-52s ║", plainPassword),
+			"╠══════════════════════════════════════════════════════════════╣",
+			"║  ⚠️  请立即登录并修改初始密码！                              ║",
+			"║  ⚠️  此密码仅在本次启动时显示一次，请妥善保管！             ║",
+			"╚══════════════════════════════════════════════════════════════╝",
+			"",
+		}
+		for _, line := range bannerLines {
+			fmt.Println(line)
+			fmt.Fprintln(os.Stderr, line)
+		}
 
 		logger.Infow("audit: initial admin password generated and bcrypt-hashed",
 			"user", "admin",

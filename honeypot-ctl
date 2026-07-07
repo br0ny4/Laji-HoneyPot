@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
-# Laji-HoneyPot 管理端运维工具 v0.17.1
-# 用法: ./honeypot-ctl {start|stop|restart|status|update|logs|build|clean|help}
+# Laji-HoneyPot 管理端运维工具 v0.19.0
+# 用法: ./honeypot-ctl {start|stop|restart|status|update|logs|build|clean|password|help}
 # ============================================================
 set -euo pipefail
 
@@ -69,7 +69,7 @@ ensure_path() {
 banner() {
     echo -e "${BOLD}${BLUE}"
     echo "  =============================================="
-    echo "        Laji-HoneyPot Management CLI v0.17.1"
+    echo "        Laji-HoneyPot Management CLI v0.19.0"
     echo "  =============================================="
     echo -e "${NC}"
 }
@@ -194,9 +194,14 @@ cmd_start() {
         cmd_build || return 1
     fi
 
-    # 检查配置文件
-    if [ ! -f "$PROJECT_ROOT/config.yaml" ]; then
-        log_warn "未找到 config.yaml，将使用默认配置"
+    # 检测首次运行（配置中无 admin_password_hash）
+    local first_run=false
+    if [ -f "$PROJECT_ROOT/config.yaml" ]; then
+        if ! grep -q 'admin_password_hash' "$PROJECT_ROOT/config.yaml" 2>/dev/null; then
+            first_run=true
+        fi
+    else
+        first_run=true
     fi
 
     # 启动服务
@@ -214,6 +219,23 @@ cmd_start() {
         echo "  日志文件:   $LOG_FILE"
         echo "  查看状态:   $0 status"
         echo "  查看日志:   $0 logs"
+
+        # 首次运行：从日志中提取初始密码
+        if [ "$first_run" = true ]; then
+            # 再等 1 秒确保密码写入日志
+            sleep 1
+            echo ""
+            if grep -A 20 '管理端初始密码' "$LOG_FILE" 2>/dev/null | head -20; then
+                echo ""
+                log_warn "⚠️  以上为首次启动自动生成的强密码，请立即登录修改！"
+                echo "  此后密码不再显示，如需再次查看请执行: $0 password"
+            else
+                log_warn "首次运行已生成强密码，请查看日志文件获取初始密码:"
+                echo "  tail -30 $LOG_FILE"
+                echo ""
+                echo "  或执行: $0 password"
+            fi
+        fi
     else
         log_error "服务启动失败，请查看日志: $LOG_FILE"
         rm -f "$PID_FILE"
@@ -422,10 +444,44 @@ cmd_logs() {
     fi
 }
 
+# 从日志中提取首次启动生成的初始密码
+cmd_password() {
+    echo -e "${BOLD}Laji-HoneyPot 初始密码${NC}"
+    echo "------------------------------------------"
+
+    if [ -f "$PROJECT_ROOT/config.yaml" ]; then
+        if grep -q 'admin_password_hash' "$PROJECT_ROOT/config.yaml" 2>/dev/null; then
+            # 配置中已有密码哈希，尝试从日志提取
+            if [ -f "$LOG_FILE" ]; then
+                if grep -q '管理端初始密码' "$LOG_FILE" 2>/dev/null; then
+                    echo ""
+                    grep -A 20 '管理端初始密码' "$LOG_FILE" 2>/dev/null | head -20
+                    echo ""
+                    log_warn "以上密码已在首次启动时生成，请妥善保管！"
+                    echo "  如已忘记，可通过管理端 UI 重新设置管理员密码。"
+                else
+                    log_warn "日志中未找到初始密码记录（可能已被清理或日志轮回）"
+                    echo "  密码哈希已存储在 config.yaml 中。"
+                    echo "  如忘记密码，请删除 config.yaml 中的 admin_password_hash 行后重启服务以重新生成。"
+                fi
+            else
+                log_warn "日志文件不存在: $LOG_FILE"
+                echo "  密码哈希已存储在 config.yaml 中。"
+            fi
+        else
+            log_info "尚未生成管理员密码（首次启动时自动生成）"
+            echo "  请执行 '$0 start' 启动服务，密码将自动生成并显示。"
+        fi
+    else
+        log_info "配置文件不存在，首次启动时将自动生成管理员强密码"
+        echo "  请执行 '$0 start' 启动服务。"
+    fi
+}
+
 # ---------- 帮助 ----------
 cmd_help() {
     banner
-    echo "用法: $0 {start|stop|restart|status|update|logs|build|clean|help}"
+    echo "用法: $0 {start|stop|restart|status|update|logs|build|clean|password|help}"
     echo ""
     echo "命令:"
     echo "  start     编译并启动 honeypot 服务"
@@ -436,6 +492,7 @@ cmd_help() {
     echo "  logs [N]  查看最近 N 行日志 (默认 50)"
     echo "  build     编译二进制 (自动删除旧产物, 覆盖写入 bin/honeypot)"
     echo "  clean     清理所有编译产物、构建缓存、部署包临时文件"
+    echo "  password  查看首次启动自动生成的初始强密码"
     echo "  help      显示帮助信息"
     echo ""
     echo "环境变量:"
@@ -459,6 +516,7 @@ cmd_help() {
     echo "  $0 update                   # 一键更新到最新版本"
     echo "  $0 logs 100                 # 最近 100 行日志"
     echo "  $0 restart                  # 重启服务"
+    echo "  $0 password                 # 查看初始管理员密码"
 }
 
 # ---------- 入口 ----------
@@ -473,6 +531,7 @@ case "${1:-help}" in
     logs)     cmd_logs "${2:-50}" ;;
     build)    cmd_build ;;
     clean)    cmd_clean ;;
+    password) cmd_password ;;    
     help|--help|-h) cmd_help ;;
     *)
         log_error "未知命令: ${1:-}"
