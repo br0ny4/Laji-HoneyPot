@@ -14,7 +14,7 @@ import UpgradePanel from './components/UpgradePanel';
 import StatusBar from './components/StatusBar';
 import LoginPage from './components/LoginPage';
 import ChangePasswordPage from './components/ChangePasswordPage';
-import { isLoggedIn, logout } from './api';
+import { isLoggedIn, logout, changeOwnPassword } from './api';
 import './App.css';
 
 type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages' | 'upgrade';
@@ -47,6 +47,15 @@ export default function App() {
   const [clusterNodes, setClusterNodes] = useState<Array<{ node_id: string; online: boolean }>>([]);
   const [preselectedNode, setPreselectedNode] = useState<string | undefined>();
 
+  // 修改密码弹窗
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [changePwdErr, setChangePwdErr] = useState('');
+  const [changePwdLoading, setChangePwdLoading] = useState(false);
+  const [changePwdOk, setChangePwdOk] = useState(false);
+
   // 定期检查令牌状态
   useEffect(() => {
     const interval = setInterval(() => {
@@ -78,6 +87,40 @@ export default function App() {
     setActiveTab(tab as Tab);
   };
 
+  const handleChangePassword = async () => {
+    setChangePwdErr('');
+    if (!oldPwd) { setChangePwdErr('请输入当前密码'); return; }
+    if (newPwd.length < 8) { setChangePwdErr('新密码至少8个字符'); return; }
+    if (newPwd !== confirmPwd) { setChangePwdErr('两次输入的新密码不一致'); return; }
+
+    setChangePwdLoading(true);
+    const result = await changeOwnPassword(oldPwd, newPwd);
+    setChangePwdLoading(false);
+
+    if (!result.success) {
+      setChangePwdErr(result.error || '密码修改失败');
+      return;
+    }
+    setChangePwdOk(true);
+    setTimeout(() => {
+      setShowChangePwd(false);
+      setChangePwdOk(false);
+      setOldPwd('');
+      setNewPwd('');
+      setConfirmPwd('');
+      setChangePwdErr('');
+    }, 1500);
+  };
+
+  const openChangePwdModal = () => {
+    setOldPwd('');
+    setNewPwd('');
+    setConfirmPwd('');
+    setChangePwdErr('');
+    setChangePwdOk(false);
+    setShowChangePwd(true);
+  };
+
   if (!authenticated) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
@@ -97,6 +140,9 @@ export default function App() {
         <div className="header-right">
           <span className="status-indicator status-online" />
           <span className="status-text">运行中</span>
+          <button className="btn-changepwd" onClick={openChangePwdModal} title="修改密码">
+            修改密码
+          </button>
           <button className="btn-logout" onClick={handleLogout} title="退出登录">
             退出
           </button>
@@ -137,6 +183,69 @@ export default function App() {
           <UpgradePanel nodes={clusterNodes} preselectedNode={preselectedNode} />
         )}
       </main>
+
+      {/* 修改密码弹窗 */}
+      {showChangePwd && (
+        <div className="modal-overlay" onClick={() => setShowChangePwd(false)}>
+          <div className="modal-content change-pwd-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>修改密码</h3>
+              <button className="btn-close" onClick={() => setShowChangePwd(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              {changePwdOk ? (
+                <div className="change-pwd-success">
+                  <span style={{ fontSize: 24, marginBottom: 8 }}>✓</span>
+                  <p>密码修改成功</p>
+                </div>
+              ) : (
+                <div className="change-pwd-form">
+                  <div className="form-group">
+                    <label>当前密码</label>
+                    <input
+                      type="password"
+                      value={oldPwd}
+                      onChange={e => setOldPwd(e.target.value)}
+                      placeholder="输入当前密码"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>新密码</label>
+                    <input
+                      type="password"
+                      value={newPwd}
+                      onChange={e => setNewPwd(e.target.value)}
+                      placeholder="至少8位，含大小写字母+数字+特殊字符"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>确认新密码</label>
+                    <input
+                      type="password"
+                      value={confirmPwd}
+                      onChange={e => setConfirmPwd(e.target.value)}
+                      placeholder="再次输入新密码"
+                      onKeyDown={e => e.key === 'Enter' && handleChangePassword()}
+                    />
+                  </div>
+                  {changePwdErr && (
+                    <div className="change-pwd-error">{changePwdErr}</div>
+                  )}
+                  <button
+                    className="btn-generate"
+                    onClick={handleChangePassword}
+                    disabled={changePwdLoading}
+                    style={{ marginTop: 8 }}
+                  >
+                    {changePwdLoading ? '修改中...' : '确认修改'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <StatusBar />
     </div>

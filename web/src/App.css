@@ -69,6 +69,18 @@ body {
 }
 .btn-logout:hover { border-color: #ef4444; color: #ef4444; }
 
+.btn-changepwd {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-changepwd:hover { border-color: #38bdf8; color: #38bdf8; }
+
 /* ========== Login Page ========== */
 .login-page {
   min-height: 100vh;
@@ -844,6 +856,16 @@ body {
 .fp-tracking-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ========== Modal (通用) ========== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
 .attack-detail-modal {
   position: fixed;
   inset: 0;
@@ -2263,6 +2285,60 @@ body {
 }
 .zero-dep-hint strong {
   color: #38bdf8;
+}
+
+/* ========== 修改密码弹窗 ========== */
+.change-pwd-modal {
+  width: 100%;
+  max-width: 420px;
+}
+
+.change-pwd-modal .form-group {
+  margin-bottom: 14px;
+}
+
+.change-pwd-modal .form-group label {
+  display: block;
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.change-pwd-modal .form-group input {
+  width: 100%;
+  padding: 10px 14px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.change-pwd-modal .form-group input:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+}
+
+.change-pwd-error {
+  padding: 10px 14px;
+  background: #450a0a;
+  border: 1px solid #7f1d1d;
+  border-radius: 8px;
+  color: #fca5a5;
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.change-pwd-success {
+  text-align: center;
+  padding: 24px 0;
+  color: #86efac;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 /* ========== 守护进程控制 & 升级按钮 (v0.19.0) ========== */
