@@ -453,6 +453,7 @@ func isExemptPath(path string) bool {
 		"/api/events",
 		"/api/countermeasure/exfil",
 		"/api/cluster/agent/package", // v0.17.1: 部署包下载无需认证
+		"/api/cluster/agent/compile/download", // v0.19.0: 编译产物下载无需认证（jobID 作为一次性 token）
 	}
 	for _, ep := range exemptPaths {
 		if path == ep || (strings.Contains(ep, "?") && ep == path) {
