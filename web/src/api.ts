@@ -161,7 +161,7 @@ export async function apiFetch(url: string, init?: RequestInit): Promise<Respons
 }
 
 /** 登录接口 */
-export async function login(username: string, password: string): Promise<{ success: boolean; error?: string }> {
+export async function login(username: string, password: string): Promise<{ success: boolean; mustChangePassword?: boolean; error?: string }> {
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -173,6 +173,10 @@ export async function login(username: string, password: string): Promise<{ succe
       return { success: false, error: data.error || '登录失败' };
     }
     persistTokens(data.access_token, data.refresh_token);
+    if (data.must_change_password) {
+      emitLog('warn', '首次登录，请修改初始密码');
+      return { success: true, mustChangePassword: true };
+    }
     emitLog('info', `登录成功: ${username} (${data.expires_in}s 有效)`);
     return { success: true };
   } catch (err: unknown) {
@@ -192,6 +196,26 @@ export async function logout(): Promise<void> {
   } catch { /* ignore */ }
   clearTokens();
   emitLog('info', '已登出');
+}
+
+/** 修改自己的密码（支持首次登录强制改密） */
+export async function changeOwnPassword(oldPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch('/api/auth/changepassword', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || '密码修改失败' };
+    }
+    emitLog('info', '密码修改成功');
+    return { success: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
 }
 
 /** SSE 已改用 JWT Authorization，但 EventSource 不支持自定义 Header，

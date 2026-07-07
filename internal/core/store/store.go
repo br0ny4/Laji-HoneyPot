@@ -231,6 +231,7 @@ func (s *Store) migrate() error {
 		username TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL,
 		role TEXT DEFAULT 'admin',
+		must_change_password INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_login DATETIME,
 		login_attempts INTEGER DEFAULT 0,
@@ -247,6 +248,8 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE attack_events ADD COLUMN risk_level TEXT DEFAULT 'low'")
 	// 迁移现有数据库：为 countermeasure_events 添加 risk_level 列
 	s.db.Exec("ALTER TABLE countermeasure_events ADD COLUMN risk_level TEXT DEFAULT 'low'")
+	// 迁移现有数据库：为 users 添加 must_change_password 列
+	s.db.Exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0")
 
 	return nil
 }
@@ -1513,18 +1516,21 @@ func boolToInt(b bool) int {
 
 // User 用户模型
 type User struct {
-	ID           int64  `json:"id"`
-	Username     string `json:"username"`
-	PasswordHash string `json:"-"`
-	Role         string `json:"role"`
-	CreatedAt    string `json:"created_at"`
-	LastLogin    string `json:"last_login,omitempty"`
+	ID                 int64  `json:"id"`
+	Username           string `json:"username"`
+	PasswordHash       string `json:"-"`
+	Role               string `json:"role"`
+	MustChangePassword bool   `json:"must_change_password"`
+	CreatedAt          string `json:"created_at"`
+	LastLogin          string `json:"last_login,omitempty"`
 }
 
 // CreateUser 创建用户
 func (s *Store) CreateUser(username, passwordHash, role string) error {
-	_, err := s.db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-		username, passwordHash, role)
+	_, err := s.db.Exec(
+		"INSERT INTO users (username, password_hash, role, must_change_password) VALUES (?, ?, ?, 1)",
+		username, passwordHash, role,
+	)
 	return err
 }
 
@@ -1539,15 +1545,19 @@ func (s *Store) UserExists(username string) (bool, error) {
 func (s *Store) GetUser(username string) (*User, error) {
 	var u User
 	var lastLogin sql.NullString
+	var mustChange sql.NullInt64
 	err := s.db.QueryRow(
-		"SELECT id, username, password_hash, role, created_at, last_login FROM users WHERE username = ?",
+		"SELECT id, username, password_hash, role, created_at, last_login, must_change_password FROM users WHERE username = ?",
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &lastLogin)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &lastLogin, &mustChange)
 	if err != nil {
 		return nil, err
 	}
 	if lastLogin.Valid {
 		u.LastLogin = lastLogin.String
+	}
+	if mustChange.Valid && mustChange.Int64 == 1 {
+		u.MustChangePassword = true
 	}
 	return &u, nil
 }
@@ -1558,9 +1568,15 @@ func (s *Store) UpdateLastLogin(userID int64) error {
 	return err
 }
 
-// UpdatePassword 更新密码哈希
+// UpdatePassword 更新密码哈希，同时清除强制修改密码标记
 func (s *Store) UpdatePassword(username, passwordHash string) error {
-	_, err := s.db.Exec("UPDATE users SET password_hash = ? WHERE username = ?", passwordHash, username)
+	_, err := s.db.Exec("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE username = ?", passwordHash, username)
+	return err
+}
+
+// SetPasswordChanged 清除用户的强制修改密码标记
+func (s *Store) SetPasswordChanged(username string) error {
+	_, err := s.db.Exec("UPDATE users SET must_change_password = 0 WHERE username = ?", username)
 	return err
 }
 

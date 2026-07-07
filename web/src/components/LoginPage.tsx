@@ -2,7 +2,7 @@ import { useState, FormEvent } from 'react';
 import { login } from '../api';
 
 interface LoginPageProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (mustChange?: boolean) => void;
 }
 
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
@@ -22,7 +22,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     try {
       const result = await login(username, password);
       if (result.success) {
-        onLoginSuccess();
+        onLoginSuccess(result.mustChangePassword);
       } else {
         setError(result.error || '登录失败');
       }

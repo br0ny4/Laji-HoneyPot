@@ -166,8 +166,9 @@ func NewAuthManagerWithSecret(cfg *JWTConfig, secret string, st *store.Store) *A
 	return NewAuthManager(cfg, st)
 }
 
-// EnsureDefaultAdmin 确保存在默认管理员账号（首次启动自动创建）
-func (a *AuthManager) EnsureDefaultAdmin() error {
+// EnsureDefaultAdmin 确保存在默认管理员账号（首次启动时使用提供的 passwordHash 创建）
+// passwordHash 应为 bcrypt 哈希值，不可为明文
+func (a *AuthManager) EnsureDefaultAdmin(passwordHash string) error {
 	exists, err := a.store.UserExists("admin")
 	if err != nil {
 		return fmt.Errorf("check admin exists: %w", err)
@@ -175,11 +176,10 @@ func (a *AuthManager) EnsureDefaultAdmin() error {
 	if exists {
 		return nil
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte("admin123"), a.config.BcryptCost)
-	if err != nil {
-		return fmt.Errorf("hash default password: %w", err)
+	if passwordHash == "" {
+		return fmt.Errorf("passwordHash is required for initial admin creation")
 	}
-	return a.store.CreateUser("admin", string(hash), "admin")
+	return a.store.CreateUser("admin", passwordHash, "admin")
 }
 
 // GenerateTokens 生成 JWT 令牌对
@@ -498,11 +498,26 @@ func (a *AuthManager) HandleLogin(logger *log.Logger, w http.ResponseWriter, r *
 		return
 	}
 
+	// 检查是否需要强制修改密码
+	user, _ := a.store.GetUser(req.Username)
+	mustChange := user != nil && user.MustChangePassword
+
 	if logger != nil {
-		logger.Infow("login success", "user", req.Username, "ip", clientIP)
+		logger.Infow("login success", "user", req.Username, "ip", clientIP, "must_change_password", mustChange)
 	}
 
-	writeJSON(w, http.StatusOK, tokens)
+	response := map[string]interface{}{
+		"access_token":  tokens.AccessToken,
+		"refresh_token": tokens.RefreshToken,
+		"token_type":    tokens.TokenType,
+		"expires_in":    tokens.ExpiresIn,
+	}
+	if mustChange {
+		response["must_change_password"] = true
+		response["message"] = "首次登录请修改初始密码"
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 // HandleRefresh 令牌刷新接口

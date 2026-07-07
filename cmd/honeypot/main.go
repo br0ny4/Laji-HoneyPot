@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/Laji-HoneyPot/honeypot/internal/alerter"
 	"github.com/Laji-HoneyPot/honeypot/internal/bait"
 	"github.com/Laji-HoneyPot/honeypot/internal/cluster"
@@ -153,7 +155,7 @@ func main() {
 		logger.Infow("alerter initialized", "channels", len(alertChannels))
 	}
 
-	// JWT 认证管理器（默认密码 admin/admin123，生产环境请务必修改）
+	// JWT 认证管理器
 	authCfg := api.DefaultJWTConfig()
 	var authMgr *api.AuthManager
 	if cfg.JWTSecret != "" {
@@ -173,7 +175,50 @@ func main() {
 		}
 		authMgr = api.NewAuthManagerWithSecret(authCfg, hexSecret, st)
 	}
-	if err := authMgr.EnsureDefaultAdmin(); err != nil {
+
+	// 管理员初始密码：首次启动自动生成强密码，后续启动永不显示
+	adminPasswordHash := cfg.AdminPasswordHash
+	if adminPasswordHash == "" {
+		plainPassword, err := api.GenerateStrongPassword()
+		if err != nil {
+			logger.Fatalw("failed to generate admin password", "error", err)
+		}
+		pwHash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), authCfg.BcryptCost)
+		if err != nil {
+			logger.Fatalw("failed to hash admin password", "error", err)
+		}
+		adminPasswordHash = string(pwHash)
+
+		// 持久化到配置文件（仅存 bcrypt 哈希，绝不存明文）
+		cfg.AdminPasswordHash = adminPasswordHash
+		if err := config.Save(cfg); err != nil {
+			logger.Warnw("failed to save admin password hash to config.yaml", "error", err)
+		}
+
+		// 终端安全输出：仅在首次启动时打印
+		fmt.Println("")
+		fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+		fmt.Println("║  🔐 Laji-HoneyPot 管理端初始密码                              ║")
+		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
+		fmt.Printf("║  用户名: admin                                               ║\n")
+		fmt.Printf("║  密  码: %-52s ║\n", plainPassword)
+		fmt.Println("╠══════════════════════════════════════════════════════════════╣")
+		fmt.Println("║  ⚠️  请立即登录并修改初始密码！                              ║")
+		fmt.Println("║  ⚠️  此密码仅在本次启动时显示一次，请妥善保管！             ║")
+		fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+		fmt.Println("")
+
+		logger.Infow("audit: initial admin password generated and bcrypt-hashed",
+			"user", "admin",
+			"hash_algorithm", "bcrypt",
+			"cost", authCfg.BcryptCost,
+			"stored_in", "config.yaml (admin_password_hash)",
+		)
+	} else {
+		logger.Info("admin password hash loaded from config (not displayed)")
+	}
+
+	if err := authMgr.EnsureDefaultAdmin(adminPasswordHash); err != nil {
 		logger.Fatalw("ensure default admin failed", "error", err)
 	}
 	logger.Infow("auth manager initialized", "default_user", "admin")

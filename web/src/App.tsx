@@ -12,6 +12,7 @@ import AgentDeployPanel from './components/AgentDeployPanel';
 import BaitLinkagePanel from './components/BaitLinkagePanel';
 import StatusBar from './components/StatusBar';
 import LoginPage from './components/LoginPage';
+import ChangePasswordPage from './components/ChangePasswordPage';
 import { isLoggedIn, logout } from './api';
 import './App.css';
 
@@ -40,6 +41,7 @@ const tabs: TabDef[] = [
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [authenticated, setAuthenticated] = useState(isLoggedIn());
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   // 定期检查令牌状态
   useEffect(() => {
@@ -49,18 +51,31 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleLoginSuccess = () => {
+  const handleLoginSuccess = (mustChange?: boolean) => {
     setAuthenticated(true);
+    if (mustChange) {
+      setMustChangePassword(true);
+    }
+  };
+
+  const handlePasswordChanged = () => {
+    setMustChangePassword(false);
   };
 
   const handleLogout = async () => {
     await logout();
     setAuthenticated(false);
+    setMustChangePassword(false);
     setActiveTab('dashboard');
   };
 
   if (!authenticated) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // 首次登录强制修改密码
+  if (mustChangePassword) {
+    return <ChangePasswordPage onPasswordChanged={handlePasswordChanged} onLogout={handleLogout} />;
   }
 
   return (

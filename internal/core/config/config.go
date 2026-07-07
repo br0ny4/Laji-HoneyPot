@@ -37,15 +37,16 @@ type WebhookConfig struct {
 
 // Config 顶层配置结构
 type Config struct {
-	LogLevel      string               `yaml:"log_level"`
-	Plugins       map[string]Section   `yaml:"plugins"`
-	APIAddr       string               `yaml:"api_addr"`
-	DataDir       string               `yaml:"data_dir"`
-	APIKey        string               `yaml:"api_key"`
-	JWTSecret     string               `yaml:"jwt_secret"`
-	Cluster       ClusterConfig        `yaml:"cluster"`
-	AlertChannels []AlertChannelConfig `yaml:"alerts,omitempty"`
-	Webhook       *WebhookConfig       `yaml:"webhook,omitempty"`
+	LogLevel          string               `yaml:"log_level"`
+	Plugins           map[string]Section   `yaml:"plugins"`
+	APIAddr           string               `yaml:"api_addr"`
+	DataDir           string               `yaml:"data_dir"`
+	APIKey            string               `yaml:"api_key"`
+	JWTSecret         string               `yaml:"jwt_secret"`
+	AdminPasswordHash string               `yaml:"admin_password_hash"` // bcrypt 哈希后的管理员密码（首次启动自动生成）
+	Cluster           ClusterConfig        `yaml:"cluster"`
+	AlertChannels     []AlertChannelConfig `yaml:"alerts,omitempty"`
+	Webhook           *WebhookConfig       `yaml:"webhook,omitempty"`
 }
 
 // Section 插件级配置，支持任意键值对

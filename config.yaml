@@ -1,4 +1,6 @@
 log_level: info
+# 管理员凭据（首次启动自动生成，请勿手动修改）
+# admin_password_hash: ""  # bcrypt 哈希，留空则由系统首次启动时自动生成强密码
 plugins:
     honeypot-engine:
         custom_templates:
