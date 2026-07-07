@@ -183,6 +183,35 @@ cmd_build() {
     log_info "编译成功: $BINARY ($(du -sh "$BINARY" 2>/dev/null | cut -f1))"
 }
 
+# 构建前端（安装依赖 + Vite 构建）
+build_frontend() {
+    if [ ! -d "$PROJECT_ROOT/web" ] || [ ! -f "$PROJECT_ROOT/web/package.json" ]; then
+        log_info "前端目录不存在，跳过前端构建"
+        return 0
+    fi
+
+    if [ -d "$PROJECT_ROOT/web/node_modules" ]; then
+        log_step "构建前端..."
+        cd "$PROJECT_ROOT/web"
+        if npm run build 2>&1; then
+            log_info "前端构建成功 → web/dist/"
+            cd "$PROJECT_ROOT"
+            return 0
+        fi
+        cd "$PROJECT_ROOT"
+        log_warn "前端构建失败，尝试重装依赖..."
+    fi
+
+    log_step "安装前端依赖并构建..."
+    cd "$PROJECT_ROOT/web"
+    if npm install 2>&1 && npm run build 2>&1; then
+        log_info "前端依赖安装及构建成功 → web/dist/"
+    else
+        log_warn "前端构建失败，将使用已有构建产物"
+    fi
+    cd "$PROJECT_ROOT"
+}
+
 cmd_start() {
     banner
     if is_running; then
@@ -193,11 +222,9 @@ cmd_start() {
         return 0
     fi
 
-    # 检查二进制文件
-    if [ ! -f "$BINARY" ]; then
-        log_info "未找到编译产物 ($BINARY)，自动编译中..."
-        cmd_build || return 1
-    fi
+    # 编译后端 + 前端
+    cmd_build || return 1
+    build_frontend
 
     # 检测首次运行（配置中无 admin_password_hash）
     local first_run=false
@@ -415,29 +442,7 @@ cmd_update() {
     # 覆盖旧编译产物
     cmd_clean
     cmd_build || return 1
-
-    # 5. 构建前端（如果 web/ 存在且有变更）
-    if [ -d "$PROJECT_ROOT/web" ] && [ -f "$PROJECT_ROOT/web/package.json" ]; then
-        log_step "检查前端是否需要重新构建..."
-        if [ -d "$PROJECT_ROOT/web/node_modules" ]; then
-            cd "$PROJECT_ROOT/web"
-            if npm run build 2>&1; then
-                log_info "前端构建成功"
-            else
-                log_warn "前端构建失败，将使用已有构建产物"
-            fi
-            cd "$PROJECT_ROOT"
-        else
-            log_step "安装前端依赖并构建..."
-            cd "$PROJECT_ROOT/web"
-            if npm install 2>&1 && npm run build 2>&1; then
-                log_info "前端依赖安装及构建成功"
-            else
-                log_warn "前端构建失败"
-            fi
-            cd "$PROJECT_ROOT"
-        fi
-    fi
+    build_frontend
 
     # 6. 重启服务
     if [ "$was_running" = true ]; then
