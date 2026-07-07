@@ -472,8 +472,8 @@ echo "  节点名:   %s"
 echo "============================================"
 `, managerAddr, nodeName, managerAddr, nodeName,
 		nodeName,
-		"$INSTALL_DIR", "$INSTALL_DIR", "$INSTALL_DIR", tlsFlag,
-		"$INSTALL_DIR", "$INSTALL_DIR",
+		"/opt/honeypot", "/opt/honeypot", "/opt/honeypot", tlsFlag,
+		"/opt/honeypot", "/opt/honeypot",
 		managerAddr, nodeName)
 
 	deployPath := filepath.Join(workDir, "deploy.sh")
