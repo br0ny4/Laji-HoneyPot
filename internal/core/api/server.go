@@ -805,6 +805,18 @@ func queryInt(r *http.Request, key string, defaultVal int) int {
 }
 
 // requestLogMiddleware 记录每个 HTTP 请求的方法、路径、状态码和耗时
+
+// detectLocalIP 检测本机网络 IP（用于 Agent 部署命令中的下载 URL）
+// 通过 UDP 连接到公网 DNS 获取实际网卡 IP，避免返回 127.0.0.1
+func detectLocalIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:53")
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+	addr := conn.LocalAddr().(*net.UDPAddr)
+	return addr.IP.String()
+}
 func requestLogMiddleware(logger *log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -1270,7 +1282,11 @@ func (s *Server) handleAgentCompile(w http.ResponseWriter, r *http.Request) {
 	}
 	// API 服务器地址（用于生成部署命令中的下载 URL）
 	if req.APIAddr == "" {
-		req.APIAddr = r.Host
+		port := "8080"
+		if _, p, err := net.SplitHostPort(r.Host); err == nil {
+			port = p
+		}
+		req.APIAddr = detectLocalIP() + ":" + port
 	}
 	if req.OSTarget == "" {
 		req.OSTarget = "linux"
