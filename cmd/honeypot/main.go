@@ -373,7 +373,25 @@ func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config,
 		}, nil
 	}
 
-	// 自动生成自签名证书（仅测试用）
+	// v0.19.0: 优先从磁盘加载持久化的自签名证书（避免重启后 CA 变化导致 Agent 验证失败）
+	certPath := "data/cluster-cert.pem"
+	keyPath := "data/cluster-key.pem"
+	if certData, err := os.ReadFile(certPath); err == nil {
+		if keyData, keyErr := os.ReadFile(keyPath); keyErr == nil {
+			tlsCert, loadErr := tls.X509KeyPair(certData, keyData)
+			if loadErr == nil {
+				logger.Info("cluster: loaded persisted self-signed TLS cert", "cert", certPath)
+				return &tls.Config{
+					Certificates:       []tls.Certificate{tlsCert},
+					MinVersion:         tls.VersionTLS13,
+					InsecureSkipVerify: true,
+				}, nil
+			}
+			logger.Warn("cluster: failed to parse persisted cert, regenerating", "error", loadErr)
+		}
+	}
+
+	// 自动生成自签名证书并持久化到磁盘
 	logger.Warn("cluster: generating self-signed TLS cert (TEST ONLY — use real certs in production)")
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -386,7 +404,7 @@ func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config,
 		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  getLocalIPs(), // v0.19.0: 包含所有本地网卡IP，支持外部Agent连接
+		IPAddresses:  getLocalIPs(),
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -394,6 +412,20 @@ func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config,
 	}
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+
+	// 持久化到磁盘（Agent 编译时需要 cluster-ca.pem）
+	os.MkdirAll("data", 0700)
+	if err := os.WriteFile(certPath, certPEM, 0600); err != nil {
+		logger.Warn("cluster: failed to persist cert", "error", err)
+	} else {
+		logger.Info("cluster: self-signed TLS cert persisted", "path", certPath)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		logger.Warn("cluster: failed to persist key", "error", err)
+	}
+	// 同时保存为 CA 证书供 Agent 编译时嵌入
+	os.WriteFile("data/cluster-ca.pem", certPEM, 0600)
+
 	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("parse cert: %w", err)
@@ -401,7 +433,7 @@ func buildClusterTLS(cfg config.ClusterConfig, logger *log.Logger) (*tls.Config,
 	return &tls.Config{
 		Certificates:       []tls.Certificate{tlsCert},
 		MinVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: true, // 测试环境不验证客户端证书
+		InsecureSkipVerify: true,
 	}, nil
 }
 func buildTrapConfigJSON(reg *traps.Registry) []byte {
