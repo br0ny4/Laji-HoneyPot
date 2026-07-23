@@ -345,3 +345,52 @@ export async function getEvidenceByIP(ip: string): Promise<{
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+// ======================== v0.22: 虚拟网络拓扑 API ========================
+
+export interface VirtualService {
+  port: number;
+  protocol: string;
+  process_name: string;
+  failure_mode: string;
+  banner: string;
+  bind_addr: string;
+}
+
+export interface VirtualHost {
+  ip: string;
+  hostname: string;
+  role: string;
+  os: string;
+  services: VirtualService[];
+  visible_after: string[];
+  is_shadow: boolean;
+}
+
+export interface VirtualSegment {
+  id: string;
+  cidr: string;
+  gateway: string;
+  description: string;
+  host_count: number;
+  hosts: VirtualHost[];
+}
+
+export interface VirtualEdge {
+  from: string;
+  to: string;
+  via: string;
+}
+
+export interface VirtualTopologyData {
+  segments: VirtualSegment[];
+  edges: VirtualEdge[];
+  host_count: number;
+}
+
+/** 获取虚拟网络拓扑配置 */
+export async function fetchVirtualTopology(): Promise<VirtualTopologyData> {
+  const res = await apiFetch('/api/topology/virtual');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}

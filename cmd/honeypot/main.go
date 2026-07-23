@@ -252,6 +252,7 @@ func main() {
 	// v0.21: 启用 SSH 高交互 Shell 模式（注入拓扑 + 蜜饵联动）
 	if topology != nil {
 		hpEngine.EnableSSHHighInteraction(topology, baitLinkage)
+		apiSrv.SetTopology(topology) // v0.22: API 暴露虚拟拓扑
 	}
 
 	// 注入攻击者画像构建器

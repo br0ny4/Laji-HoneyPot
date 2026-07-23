@@ -26,6 +26,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
+	"github.com/Laji-HoneyPot/honeypot/internal/domain"
 	"github.com/Laji-HoneyPot/honeypot/internal/evidence"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
@@ -63,6 +64,7 @@ type Server struct {
 	baitTracker     *bait.Tracker           // 蜜标访问追踪器
 	baitLinkage     *bait.LinkageEngine     // 蜜饵联动引擎
 	evidenceColl    *evidence.Collector     // v0.20: 渐进证据收集器
+	topology        *domain.VirtualTopology // v0.22: 虚拟网络拓扑
 	mux             *http.ServeMux
 	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
 	startTime       time.Time
@@ -170,6 +172,11 @@ func (s *Server) SetEvidenceCollector(coll *evidence.Collector) {
 	s.evidenceColl = coll
 }
 
+// SetTopology 注入虚拟网络拓扑（由 main 注入, v0.22）
+func (s *Server) SetTopology(t *domain.VirtualTopology) {
+	s.topology = t
+}
+
 // SetUpgradeManager 注入升级管理器（由 main 注入）
 func (s *Server) SetUpgradeManager(mgr *upgrade.UpgradeManager) {
 	s.upgradeMgr = mgr
@@ -198,6 +205,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/attackers", s.handleAttackers)
 	// 拓扑图数据
 	s.mux.HandleFunc("/api/topology", s.handleTopology)
+	s.mux.HandleFunc("/api/topology/virtual", s.handleVirtualTopology) // v0.22: 虚拟网络拓扑
 	// 指纹数据
 	s.mux.HandleFunc("/api/fingerprints", s.handleFingerprints)
 	// 系统状态
@@ -511,6 +519,67 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, td)
+}
+
+// handleVirtualTopology 返回虚拟网络拓扑（v0.22）
+// GET /api/topology/virtual
+// 返回完整的 YAML 配置拓扑结构：网段、主机、服务、连通边
+func (s *Server) handleVirtualTopology(w http.ResponseWriter, r *http.Request) {
+	if s.topology == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"message": "virtual topology not configured"})
+		return
+	}
+
+	segments := make([]map[string]interface{}, 0)
+	for _, seg := range s.topology.GetAllSegments() {
+		hosts := s.topology.GetHostsInSubnet(seg.ID)
+		hostList := make([]map[string]interface{}, 0, len(hosts))
+		for _, h := range hosts {
+			svcs := make([]map[string]interface{}, 0, len(h.Services))
+			for _, svc := range h.Services {
+				svcs = append(svcs, map[string]interface{}{
+					"port":         svc.Port,
+					"protocol":     svc.Protocol,
+					"process_name": svc.ProcessName,
+					"failure_mode": svc.FailureMode,
+					"banner":       svc.Banner,
+					"bind_addr":    svc.BindAddr,
+				})
+			}
+			hostList = append(hostList, map[string]interface{}{
+				"ip":            h.IP,
+				"hostname":      h.Hostname,
+				"role":          h.Role,
+				"os":            h.OS,
+				"services":      svcs,
+				"visible_after": h.VisibleAfter,
+				"is_shadow":     h.IsShadow,
+			})
+		}
+		segments = append(segments, map[string]interface{}{
+			"id":          seg.ID,
+			"cidr":        seg.CIDR,
+			"gateway":     seg.Gateway,
+			"description": seg.Desc,
+			"host_count":  len(hosts),
+			"hosts":       hostList,
+		})
+	}
+
+	edges := make([]map[string]string, 0, len(s.topology.GetEdges()))
+	for _, e := range s.topology.GetEdges() {
+		edges = append(edges, map[string]string{
+			"from": e.From,
+			"to":   e.To,
+			"via":  e.Via,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"segments":   segments,
+		"edges":      edges,
+		"host_count": s.topology.HostCount(),
+	})
 }
 
 func (s *Server) handleFingerprints(w http.ResponseWriter, r *http.Request) {

@@ -149,6 +149,24 @@ func (t *VirtualTopology) GetSubnet(id string) *Segment {
 	return t.segments[id]
 }
 
+// GetAllSegments 返回所有网段信息
+func (t *VirtualTopology) GetAllSegments() []Segment {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	result := make([]Segment, 0, len(t.segments))
+	for _, seg := range t.segments {
+		result = append(result, *seg)
+	}
+	return result
+}
+
+// GetEdges 返回所有连通边
+func (t *VirtualTopology) GetEdges() []Edge {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.config.Edges
+}
+
 // IsVirtualIP 检查 IP 是否在虚拟拓扑的子网范围内
 func (t *VirtualTopology) IsVirtualIP(ip string) bool {
 	parsed := net.ParseIP(ip)

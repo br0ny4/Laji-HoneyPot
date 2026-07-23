@@ -10,10 +10,10 @@
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
                       <!-- BEGIN-AUTO:TESTS -->
-  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-32%2F32%20PASS-brightgreen" alt="Tests" /></a>
+  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-457%2F457%20PASS-brightgreen" alt="Tests" /></a>
   <!-- END-AUTO:TESTS -->
                       <!-- BEGIN-AUTO:VERSION -->
-  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.21.0-blue" alt="Version" /></a>
+  <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.22.0-blue" alt="Version" /></a>
   <!-- END-AUTO:VERSION -->
 </p>
 
@@ -274,7 +274,7 @@ git push origin master
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          Laji-HoneyPot 系统架构                              │
-│                        v0.21.0 (SSH 高交互 Shell + 虚拟拓扑)                  │
+│                        v0.22.0 (虚拟拓扑管理 + 可视化)                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 
                               ┌────────────────────────┐
@@ -880,6 +880,7 @@ cd web && npm run lint            # ESLint 检查
 - [x] 渐进证据收集系统 — per-IP 去重 + 12 种证据令牌 + SQLite 持久化 + 管理端展示（v0.20.0）
 - [x] SSH 高交互命令 Shell — x/crypto SSH 协议握手 + 30+ 假命令模拟器 + 拓扑感知输出（v0.21.0）
 - [x] 虚拟网络拓扑系统 — YAML 配置驱动 + 3 网段/12 主机 + 证据门控可见性 + 影子主机扩展（v0.21.0）
+- [x] 虚拟拓扑管理 API + 前端可视化 — GET /api/topology/virtual + VirtualTopologyPanel 组件 + 网段/主机/服务/边全景展示（v0.22.0）
 
 ---
 

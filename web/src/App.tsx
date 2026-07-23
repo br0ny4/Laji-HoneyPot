@@ -12,13 +12,15 @@ import AgentDeployPanel from './components/AgentDeployPanel';
 import BaitLinkagePanel from './components/BaitLinkagePanel';
 import UpgradePanel from './components/UpgradePanel';
 import EvidencePanel from './components/EvidencePanel';
+import VirtualTopologyPanel from './components/VirtualTopologyPanel';
 import StatusBar from './components/StatusBar';
 import LoginPage from './components/LoginPage';
 import ChangePasswordPage from './components/ChangePasswordPage';
 import { isLoggedIn, logout, changeOwnPassword } from './api';
 import './App.css';
+import './components/VirtualTopologyPanel.css';
 
-type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages' | 'upgrade' | 'evidence';
+type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages' | 'upgrade' | 'evidence' | 'vtopology';
 
 interface TabDef {
   key: Tab;
@@ -40,6 +42,7 @@ const tabs: TabDef[] = [
   { key: 'linkages', label: '蜜饵联动', icon: '' },
   { key: 'upgrade', label: 'Agent升级', icon: '' },
   { key: 'evidence', label: '证据收集', icon: '' },
+  { key: 'vtopology', label: '虚拟拓扑', icon: '' },
 ];
 
 export default function App() {
@@ -137,7 +140,7 @@ export default function App() {
       <header className="app-header">
         <div className="header-left">
           <h1 className="app-title">Laji-HoneyPot</h1>
-          <span className="app-version">v0.19.0</span>
+          <span className="app-version">v0.21.0</span>
         </div>
         <div className="header-right">
           <span className="status-indicator status-online" />
@@ -186,6 +189,9 @@ export default function App() {
         )}
         {activeTab === 'evidence' && (
           <EvidencePanel />
+        )}
+        {activeTab === 'vtopology' && (
+          <VirtualTopologyPanel />
         )}
       </main>
 
