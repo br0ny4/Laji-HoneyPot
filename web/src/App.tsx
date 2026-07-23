@@ -11,13 +11,14 @@ import ClusterPanel from './components/ClusterPanel';
 import AgentDeployPanel from './components/AgentDeployPanel';
 import BaitLinkagePanel from './components/BaitLinkagePanel';
 import UpgradePanel from './components/UpgradePanel';
+import EvidencePanel from './components/EvidencePanel';
 import StatusBar from './components/StatusBar';
 import LoginPage from './components/LoginPage';
 import ChangePasswordPage from './components/ChangePasswordPage';
 import { isLoggedIn, logout, changeOwnPassword } from './api';
 import './App.css';
 
-type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages' | 'upgrade';
+type Tab = 'dashboard' | 'topology' | 'attacks' | 'fingerprints' | 'countermeasures' | 'assets' | 'cluster' | 'agent' | 'ops' | 'profiles' | 'linkages' | 'upgrade' | 'evidence';
 
 interface TabDef {
   key: Tab;
@@ -38,6 +39,7 @@ const tabs: TabDef[] = [
   { key: 'profiles', label: '攻击者画像', icon: '' },
   { key: 'linkages', label: '蜜饵联动', icon: '' },
   { key: 'upgrade', label: 'Agent升级', icon: '' },
+  { key: 'evidence', label: '证据收集', icon: '' },
 ];
 
 export default function App() {
@@ -181,6 +183,9 @@ export default function App() {
         {activeTab === 'linkages' && <BaitLinkagePanel />}
         {activeTab === 'upgrade' && (
           <UpgradePanel nodes={clusterNodes} preselectedNode={preselectedNode} />
+        )}
+        {activeTab === 'evidence' && (
+          <EvidencePanel />
         )}
       </main>
 

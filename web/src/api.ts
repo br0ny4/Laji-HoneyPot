@@ -305,3 +305,43 @@ export async function controlAgentDaemon(nodeID: string, action: 'start' | 'stop
     throw new Error(err.error || `HTTP ${res.status}`);
   }
 }
+
+// ======================== v0.20: 证据收集 API ========================
+
+export interface EvidenceSummary {
+  remote_ip: string;
+  total_evidence: number;
+  last_seen: string;
+  top_categories: Array<{ category: string; count: number }>;
+  live_tokens: string[];
+}
+
+/** 获取所有攻击者的证据摘要 */
+export async function listEvidenceSummaries(): Promise<EvidenceSummary[]> {
+  const res = await apiFetch('/api/evidence');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** 获取指定攻击者的证据详情 */
+export async function getEvidenceByIP(ip: string): Promise<{
+  ip: string;
+  events: Array<{
+    id: number;
+    timestamp: string;
+    remote_ip: string;
+    token: string;
+    token_label: string;
+    category: string;
+    risk_level: string;
+    input_preview: string;
+    intent_category: string;
+    intent_confidence: number;
+  }>;
+  live_tokens: string[];
+  total: number;
+}> {
+  const res = await apiFetch(`/api/evidence/${encodeURIComponent(ip)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}

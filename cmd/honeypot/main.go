@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/yaml.v3"
 
 	"github.com/Laji-HoneyPot/honeypot/internal/alerter"
 	"github.com/Laji-HoneyPot/honeypot/internal/bait"
@@ -32,6 +33,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/registry"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
+	"github.com/Laji-HoneyPot/honeypot/internal/domain"
 	honeypotEngine "github.com/Laji-HoneyPot/honeypot/internal/honeypot"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	opsEngine "github.com/Laji-HoneyPot/honeypot/internal/ops"
@@ -104,6 +106,9 @@ func main() {
 		baitLinkage.RegisterFromToken(&t, svcHosts)
 	}
 	logger.Infow("bait linkages registered", "total", baitLinkage.Stats()["total"])
+
+	// v0.21: 加载虚拟网络拓扑配置（SSH 高交互 Shell 依赖）
+	topology := loadTopology(logger)
 
 	// 注入蜜标系统到 HTTP 蜜罐（所有 HTTP 响应自动包含蜜标链接）
 	hpEngine.SetBaitSystem(baitGen, baitTracker)
@@ -238,10 +243,16 @@ func main() {
 	logger.Infow("auth manager initialized", "default_user", "admin")
 
 	apiSrv := api.NewServer(logger, st, trEngine.GetVulnDB(), wsHub, authMgr)
-	apiSrv.SetTraceEngine(trEngine)            // 注入溯源反制引擎（深度反制 API）
-	apiSrv.SetHoneypotEngine(hpEngine)         // 注入蜜罐引擎（服务状态查询 API）
-	apiSrv.SetBaitSystem(baitGen, baitTracker) // 注入蜜标系统（诱饵管理 API）
-	apiSrv.SetBaitLinkage(baitLinkage)         // 注入蜜饵联动引擎
+	apiSrv.SetTraceEngine(trEngine)                              // 注入溯源反制引擎（深度反制 API）
+	apiSrv.SetHoneypotEngine(hpEngine)                           // 注入蜜罐引擎（服务状态查询 API）
+	apiSrv.SetBaitSystem(baitGen, baitTracker)                   // 注入蜜标系统（诱饵管理 API）
+	apiSrv.SetBaitLinkage(baitLinkage)                           // 注入蜜饵联动引擎
+	apiSrv.SetEvidenceCollector(hpEngine.GetEvidenceCollector()) // v0.20: 证据收集器
+
+	// v0.21: 启用 SSH 高交互 Shell 模式（注入拓扑 + 蜜饵联动）
+	if topology != nil {
+		hpEngine.EnableSSHHighInteraction(topology, baitLinkage)
+	}
 
 	// 注入攻击者画像构建器
 	profileBuilder := profile.NewBuilder(st)
@@ -542,6 +553,32 @@ func handleAgentDaemon() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", actionErr)
 		os.Exit(1)
 	}
+}
+
+// loadTopology v0.21: 加载虚拟网络拓扑配置
+// 默认从 configs/topology.yaml 读取，支持通过 HP_TOPOLOGY_PATH 环境变量覆盖
+func loadTopology(logger *log.Logger) *domain.VirtualTopology {
+	path := os.Getenv("HP_TOPOLOGY_PATH")
+	if path == "" {
+		path = "configs/topology.yaml"
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		logger.Warnw("topology config not found, SSH high-interaction disabled", "path", path, "error", err)
+		return nil
+	}
+	var config domain.TopologyConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		logger.Warnw("failed to parse topology config", "path", path, "error", err)
+		return nil
+	}
+	topo := domain.NewTopology(config)
+	logger.Infow("virtual topology loaded",
+		"hosts", topo.HostCount(),
+		"segments", len(config.Segments),
+		"edges", len(config.Edges),
+	)
+	return topo
 }
 
 // getLocalIPs 获取本机所有网卡 IP（含 127.0.0.1，用于 TLS 证书 SAN）

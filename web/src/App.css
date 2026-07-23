@@ -2412,3 +2412,229 @@ body {
     font-size: 11px;
   }
 }
+
+/* ========== v0.20: Evidence Panel ========== */
+.evidence-panel { }
+
+.evidence-layout {
+  display: flex;
+  gap: 20px;
+  height: calc(100vh - 200px);
+  min-height: 500px;
+}
+
+.evidence-attacker-list {
+  width: 340px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid #1e293b;
+  padding-right: 16px;
+}
+.evidence-attacker-list h3 {
+  font-size: 14px;
+  color: #94a3b8;
+  margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  background: #111827;
+  padding: 8px 0;
+  z-index: 1;
+}
+
+.evidence-attacker-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.evidence-attacker-card:hover { border-color: #38bdf8; }
+.evidence-attacker-card.selected {
+  border-color: #38bdf8;
+  background: #172554;
+  box-shadow: 0 0 0 1px #38bdf840;
+}
+
+.attacker-ip {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fca5a5;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  margin-bottom: 6px;
+}
+
+.attacker-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.stat-badge {
+  background: #0ea5e9;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.stat-time { font-size: 11px; color: #475569; }
+
+.attacker-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.cat-tag {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #27272a;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.live-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.tokens-label {
+  font-size: 10px;
+  color: #475569;
+  margin-right: 2px;
+}
+.token-tag {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #172554;
+  color: #93c5fd;
+  font-size: 10px;
+  border: 1px solid #1e3a5f;
+}
+
+.evidence-detail {
+  flex: 1;
+  overflow-y: auto;
+  padding-left: 8px;
+}
+.evidence-detail h3 {
+  font-size: 14px;
+  color: #94a3b8;
+  margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  background: #111827;
+  padding: 8px 0;
+  z-index: 1;
+}
+
+.detail-empty, .detail-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: #475569;
+  font-size: 14px;
+}
+
+.evidence-table-wrap {
+  overflow-x: auto;
+}
+.evidence-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.evidence-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: #64748b;
+  font-weight: 500;
+  border-bottom: 1px solid #1e293b;
+  white-space: nowrap;
+}
+.evidence-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #0f172a;
+  color: #cbd5e1;
+}
+.evidence-table tr:hover td { background: #1e293b; }
+
+.col-time {
+  font-size: 11px;
+  color: #64748b !important;
+  white-space: nowrap;
+  font-family: monospace;
+}
+.col-input {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #94a3b8 !important;
+  font-family: monospace;
+}
+
+.token-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #172554;
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid #1e3a5f;
+  white-space: nowrap;
+}
+
+.risk-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.intent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #a78bfa;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid #2e1065;
+  white-space: nowrap;
+}
+.intent-badge .confidence {
+  color: #7c3aed;
+  font-size: 10px;
+}
+
+.panel-subtitle {
+  font-size: 12px;
+  color: #64748b;
+}
+
+@media (max-width: 768px) {
+  .evidence-layout {
+    flex-direction: column;
+    height: auto;
+  }
+  .evidence-attacker-list {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #1e293b;
+    padding-right: 0;
+    padding-bottom: 12px;
+    max-height: 300px;
+  }
+  .evidence-detail { padding-left: 0; }
+}

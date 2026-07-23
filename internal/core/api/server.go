@@ -26,6 +26,7 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/profile"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
+	"github.com/Laji-HoneyPot/honeypot/internal/evidence"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
 	"github.com/Laji-HoneyPot/honeypot/internal/ops/daemon"
@@ -61,6 +62,7 @@ type Server struct {
 	baitGen         *bait.Generator         // 蜜标生成器
 	baitTracker     *bait.Tracker           // 蜜标访问追踪器
 	baitLinkage     *bait.LinkageEngine     // 蜜饵联动引擎
+	evidenceColl    *evidence.Collector     // v0.20: 渐进证据收集器
 	mux             *http.ServeMux
 	frontendHandler http.Handler // 可选：嵌入式前端 SPA handler
 	startTime       time.Time
@@ -163,6 +165,11 @@ func (s *Server) SetBaitLinkage(linkage *bait.LinkageEngine) {
 	s.baitLinkage = linkage
 }
 
+// SetEvidenceCollector 注入证据收集器（由 main 注入, v0.20）
+func (s *Server) SetEvidenceCollector(coll *evidence.Collector) {
+	s.evidenceColl = coll
+}
+
 // SetUpgradeManager 注入升级管理器（由 main 注入）
 func (s *Server) SetUpgradeManager(mgr *upgrade.UpgradeManager) {
 	s.upgradeMgr = mgr
@@ -228,6 +235,9 @@ func (s *Server) registerRoutes() {
 	// 攻击者画像 v2 — Builder 聚合接口
 	s.mux.HandleFunc("/api/profile/attackers", s.handleProfileAttackers)
 	s.mux.HandleFunc("/api/profile/attacker", s.handleProfileAttacker)
+	// v0.20: 意图分析 + 证据收集
+	s.mux.HandleFunc("/api/evidence", s.handleEvidenceList)
+	s.mux.HandleFunc("/api/evidence/", s.handleEvidenceByIP)
 	// 资产探测
 	s.mux.HandleFunc("/api/assets/scan", s.handleAssetScan)
 	// 集群节点
@@ -1133,6 +1143,99 @@ func (s *Server) handleTrapConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(s.trapConfigData)
+}
+
+// handleEvidenceList 获取所有攻击者的证据摘要（GET /api/evidence）
+func (s *Server) handleEvidenceList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+
+	// 从 SQLite 查询证据摘要
+	summaries, err := s.store.GetAttackerEvidenceSummaries()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	// 增强数据：从内存收集器补充实时的 token 总数
+	type EnhancedSummary struct {
+		RemoteIP      string                `json:"remote_ip"`
+		TotalEvidence int                   `json:"total_evidence"`
+		LastSeen      string                `json:"last_seen"`
+		TopCategories []store.EvidenceCount `json:"top_categories"`
+		LiveTokens    []string              `json:"live_tokens,omitempty"`
+	}
+	enhanced := make([]EnhancedSummary, 0, len(summaries))
+	for _, sm := range summaries {
+		es := EnhancedSummary{
+			RemoteIP:      sm.RemoteIP,
+			TotalEvidence: sm.TotalEvidence,
+			LastSeen:      sm.LastSeen,
+			TopCategories: sm.TopCategories,
+		}
+		if s.evidenceColl != nil {
+			tokens := s.evidenceColl.CollectedTokens(sm.RemoteIP)
+			es.LiveTokens = make([]string, len(tokens))
+			for i, t := range tokens {
+				es.LiveTokens[i] = string(t)
+			}
+		}
+		enhanced = append(enhanced, es)
+	}
+	if enhanced == nil {
+		enhanced = []EnhancedSummary{}
+	}
+
+	writeJSON(w, http.StatusOK, enhanced)
+}
+
+// handleEvidenceByIP 获取指定攻击者的证据详情（GET /api/evidence/{ip}）
+func (s *Server) handleEvidenceByIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"error": "method not allowed"})
+		return
+	}
+
+	// 提取 IP（路径格式: /api/evidence/192.168.1.1）
+	ip := strings.TrimPrefix(r.URL.Path, "/api/evidence/")
+	if ip == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "missing IP parameter"})
+		return
+	}
+
+	// 从 SQLite 获取证据列表
+	events, err := s.store.GetEvidenceByIP(ip)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if events == nil {
+		events = []store.EvidenceEvent{}
+	}
+
+	// 补充 token 中文标签
+	for i := range events {
+		events[i].TokenLabel = evidence.Token(events[i].Token).TagName()
+	}
+
+	// 从内存收集器获取实时 token 集合
+	liveTokens := []string{}
+	if s.evidenceColl != nil {
+		tokens := s.evidenceColl.CollectedTokens(ip)
+		liveTokens = make([]string, len(tokens))
+		for i, t := range tokens {
+			liveTokens[i] = string(t)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ip":          ip,
+		"events":      events,
+		"live_tokens": liveTokens,
+		"total":       len(events),
+	})
 }
 
 // handleAgentGenerate 生成 Agent 部署配置与命令（POST /api/cluster/agent/generate）

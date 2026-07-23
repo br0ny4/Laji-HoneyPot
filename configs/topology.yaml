@@ -1,0 +1,251 @@
+# Laji-HoneyPot 虚拟网络拓扑配置 (v0.21)
+# 定义蜜罐网络中的虚拟主机、网段、连通关系和证据门控。
+# 每个虚拟主机的 Services 定义其暴露的服务端口和协议，
+# 攻击者在 SSH 会话中看到的 netstat/arp 等输出将与此配置一致。
+
+segments:
+  - id: web-dmz
+    cidr: 192.168.56.0/24
+    gateway: 192.168.56.1
+    desc: "Web DMZ 区域 — 对外暴露的 Web 服务网段"
+
+  - id: app-tier
+    cidr: 192.168.57.0/24
+    gateway: 192.168.57.1
+    desc: "应用层 — 内部服务与数据库集群"
+
+  - id: infra-tier
+    cidr: 192.168.58.0/24
+    gateway: 192.168.58.1
+    desc: "基础设施 — 域控、日志、监控、CI/CD"
+
+hosts:
+  # ========== Web DMZ (192.168.56.0/24) ==========
+  - ip: 192.168.56.10
+    hostname: web-prod-01
+    role: web
+    os: Ubuntu 22.04 LTS
+    subnet_id: web-dmz
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 80
+        protocol: http
+        process_name: nginx
+        failure_mode: redirect_login
+      - port: 443
+        protocol: https
+        process_name: nginx
+        failure_mode: redirect_login
+      - port: 8080
+        protocol: http-proxy
+        process_name: tomcat
+        banner: Apache Tomcat/9.0.80
+        failure_mode: redirect_login
+
+  - ip: 192.168.56.11
+    hostname: web-prod-02
+    role: web
+    os: Ubuntu 22.04 LTS
+    subnet_id: web-dmz
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 80
+        protocol: http
+        process_name: nginx
+        failure_mode: redirect_login
+      - port: 443
+        protocol: https
+        process_name: nginx
+        failure_mode: redirect_login
+
+  - ip: 192.168.56.20
+    hostname: jumpbox
+    role: jumpbox
+    os: CentOS 7
+    subnet_id: web-dmz
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+
+  # ========== 应用层 (192.168.57.0/24) ==========
+  - ip: 192.168.57.10
+    hostname: db-master-01
+    role: db
+    os: CentOS 7
+    subnet_id: app-tier
+    visible_after:
+      - subnet_scan
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 3306
+        protocol: mysql
+        process_name: mysqld
+        bind_addr: 0.0.0.0
+        failure_mode: auth_denied
+        banner: MySQL 5.7.42
+
+  - ip: 192.168.57.11
+    hostname: db-replica-01
+    role: db
+    os: CentOS 7
+    subnet_id: app-tier
+    visible_after:
+      - subnet_scan
+      - db_probe
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 3306
+        protocol: mysql
+        process_name: mysqld
+        bind_addr: 0.0.0.0
+        failure_mode: auth_denied
+      - port: 6379
+        protocol: redis
+        process_name: redis-server
+        bind_addr: 127.0.0.1
+        failure_mode: refused
+
+  - ip: 192.168.57.20
+    hostname: app-node-01
+    role: app
+    os: Ubuntu 20.04 LTS
+    subnet_id: app-tier
+    visible_after:
+      - subnet_scan
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 3000
+        protocol: http
+        process_name: node
+        failure_mode: redirect_login
+      - port: 9090
+        protocol: http
+        process_name: node-exporter
+        failure_mode: redirect_login
+
+  # ========== 基础设施 (192.168.58.0/24) ==========
+  - ip: 192.168.58.10
+    hostname: dc01
+    role: dc
+    os: Windows Server 2019
+    subnet_id: infra-tier
+    visible_after:
+      - subnet_scan
+      - domain_probe
+    services:
+      - port: 53
+        protocol: dns
+        process_name: ""
+        failure_mode: refused
+      - port: 88
+        protocol: kerberos
+        process_name: ""
+        failure_mode: auth_required
+      - port: 389
+        protocol: ldap
+        process_name: ""
+        failure_mode: stronger_auth_required
+      - port: 445
+        protocol: smb
+        process_name: ""
+        failure_mode: access_denied
+
+  - ip: 192.168.58.20
+    hostname: jenkins-ci
+    role: jenkins
+    os: Ubuntu 22.04 LTS
+    subnet_id: infra-tier
+    visible_after:
+      - subnet_scan
+      - app_config
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 8080
+        protocol: http
+        process_name: java
+        banner: "Jenkins 2.440"
+        failure_mode: redirect_login
+      - port: 50000
+        protocol: tcp
+        process_name: java
+        failure_mode: refused
+
+  - ip: 192.168.58.30
+    hostname: gitlab-internal
+    role: gitlab
+    os: Ubuntu 20.04 LTS
+    subnet_id: infra-tier
+    visible_after:
+      - subnet_scan
+      - app_config
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 443
+        protocol: https
+        process_name: nginx
+        banner: "GitLab CE"
+        failure_mode: redirect_login
+
+  - ip: 192.168.58.40
+    hostname: elastic-master
+    role: elastic
+    os: CentOS 8
+    subnet_id: infra-tier
+    visible_after:
+      - subnet_scan
+      - app_log
+    services:
+      - port: 22
+        protocol: ssh
+        process_name: sshd
+      - port: 9200
+        protocol: http
+        process_name: java
+        banner: "Elasticsearch 7.17"
+        failure_mode: auth_denied
+      - port: 5601
+        protocol: http
+        process_name: node
+        banner: "Kibana 7.17"
+        failure_mode: redirect_login
+
+edges:
+  # DMZ → 应用层
+  - from: 192.168.56.20
+    to: 192.168.57.10
+    via: ssh
+  - from: 192.168.56.20
+    to: 192.168.57.20
+    via: ssh
+  # 应用层内部互通
+  - from: 192.168.57.10
+    to: 192.168.57.11
+    via: mysql
+  - from: 192.168.57.20
+    to: 192.168.57.10
+    via: mysql
+  # 应用层 → 基础设施
+  - from: 192.168.57.20
+    to: 192.168.58.20
+    via: http
+  - from: 192.168.57.20
+    to: 192.168.58.30
+    via: https
+  - from: 192.168.57.10
+    to: 192.168.58.40
+    via: http

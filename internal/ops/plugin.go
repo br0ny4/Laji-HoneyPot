@@ -45,11 +45,20 @@ func (e *Engine) Init(cfg config.Section) error {
 	// 推测项目根目录
 	e.projectDir = e.detectProjectDir()
 
-	// 初始化 GitHub Syncer（可选）
+	// 初始化 GitHub Syncer（优先环境变量 GITHUB_TOKEN，其次 config）
 	token := cfg.Get("github_token")
+	if token == "" {
+		token = os.Getenv("GITHUB_TOKEN")
+	}
 	owner := cfg.Get("github_owner")
+	if owner == "" {
+		owner = os.Getenv("GITHUB_REPOSITORY_OWNER")
+	}
 	repo := cfg.Get("github_repo")
 	branch := cfg.Get("github_branch")
+	if branch == "" {
+		branch = "main"
+	}
 	if token != "" && owner != "" && repo != "" {
 		e.syncer = github.NewSyncer(e.logger, token, owner, repo, branch)
 		e.logger.Info("github syncer initialized",
@@ -119,6 +128,7 @@ func (e *Engine) autoUpdateReadme() {
 }
 
 // commitReadmeToGitHub 读取更新后的 README.md 并推送到 GitHub
+// 优先使用 GitHub API（需要 GITHUB_TOKEN），不可用时 fallback 到本地 git 命令
 func (e *Engine) commitReadmeToGitHub() {
 	readmePath := filepath.Join(e.projectDir, "README.md")
 	content, err := os.ReadFile(readmePath)
@@ -128,18 +138,41 @@ func (e *Engine) commitReadmeToGitHub() {
 	}
 
 	version := core.Version
-	files := []github.CommitContent{{
-		Path:    "README.md",
-		Content: string(content),
-		Message: "auto: update README.md for v" + version,
-	}}
 
-	if err := e.syncer.CommitFiles(files); err != nil {
-		e.logger.Warnw("GitHub commit failed", "error", err)
-		return
+	// 优先：GitHub Contents API（需要 token）
+	if e.syncer != nil {
+		files := []github.CommitContent{{
+			Path:    "README.md",
+			Content: string(content),
+			Message: "auto: update README.md for v" + version,
+		}}
+		if err := e.syncer.CommitFiles(files); err != nil {
+			e.logger.Warnw("GitHub API commit failed, falling back to local git", "error", err)
+		} else {
+			e.logger.Info("README.md committed to GitHub via API")
+			return
+		}
 	}
 
-	e.logger.Info("README.md committed to GitHub successfully")
+	// Fallback: 本地 git add + commit + push（支持 SSH remote，无需 token）
+	e.logger.Info("committing README via local git")
+	commitMsg := "auto: update README.md for v" + version
+	cmds := [][]string{
+		{"git", "add", "README.md"},
+		{"git", "commit", "-m", commitMsg},
+		{"git", "push"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = e.projectDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			// commit 可能因无变更而失败，这是正常的
+			if args[1] == "commit" && strings.Contains(string(out), "nothing to commit") {
+				continue
+			}
+			e.logger.Warnw("git command failed", "cmd", args[1], "output", string(out), "error", err)
+		}
+	}
 }
 
 // countTestPackages 统计通过测试的包数量

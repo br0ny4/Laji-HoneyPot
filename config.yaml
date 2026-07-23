@@ -1,6 +1,4 @@
 log_level: info
-# 管理员凭据（首次启动自动生成，请勿手动修改）
-# admin_password_hash: ""  # bcrypt 哈希，留空则由系统首次启动时自动生成强密码
 plugins:
     honeypot-engine:
         custom_templates:
@@ -60,10 +58,10 @@ plugins:
         trap_scenario: full
     ops-engine:
         enabled: true
-        github_token: ""
+        github_branch: master
         github_owner: br0ny4
         github_repo: Laji-HoneyPot
-        github_branch: master
+        github_token: ""
     traceability-engine:
         enabled: true
         update_interval: 24h
@@ -71,6 +69,7 @@ api_addr: 0.0.0.0:8080
 data_dir: ./data
 api_key: hp-admin-2024
 jwt_secret: d00071d805b52e7ce66176c43be999da17d50560bcd9f42f25c33d3730f721d2
+admin_password_hash: $2a$12$8E7aD0Odshqq46gVlaqRIe1SFmA8pYgQKomQVFKhCH55toyjxsI5O
 cluster:
     enabled: true
     role: manager

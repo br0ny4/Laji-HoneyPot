@@ -16,6 +16,8 @@ import (
 	"github.com/Laji-HoneyPot/honeypot/internal/core/config"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/log"
 	"github.com/Laji-HoneyPot/honeypot/internal/core/store"
+	"github.com/Laji-HoneyPot/honeypot/internal/domain"
+	"github.com/Laji-HoneyPot/honeypot/internal/evidence"
 	dnsSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/dns"
 	ftpSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ftp"
 	httpSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/http"
@@ -27,6 +29,7 @@ import (
 	sshSvc "github.com/Laji-HoneyPot/honeypot/internal/honeypot/services/ssh"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/tcpstack"
 	"github.com/Laji-HoneyPot/honeypot/internal/honeypot/traps"
+	"github.com/Laji-HoneyPot/honeypot/internal/intent"
 	"github.com/Laji-HoneyPot/honeypot/internal/plugin"
 )
 
@@ -44,7 +47,9 @@ type Engine struct {
 	portOffset       int                                           // 端口偏移量（HP_PORT_OFFSET 环境变量）
 	trapRegistry     *traps.Registry                               // 陷阱模块注册中心（场景化选配）
 	httpSrv          *httpSvc.Server                               // HTTP 蜜罐实例
+	sshSrv           *sshSvc.Server                                // SSH 蜜罐实例 (v0.21: 高交互模式)
 	countermeasureFn func(path, userAgent, remoteIP string) string // 面包屑触发的反制 JS 注入回调
+	evidenceColl     *evidence.Collector                           // v0.20: 渐进证据收集器
 	scanMu           sync.Mutex
 	scanTracker      map[string]*scanState // IP -> 扫描状态
 }
@@ -64,11 +69,12 @@ const (
 // NewEngine 创建蜜罐引擎
 func NewEngine(logger *log.Logger, bus *bus.Bus, st *store.Store) *Engine {
 	return &Engine{
-		logger:      logger,
-		bus:         bus,
-		store:       st,
-		stack:       tcpstack.New(logger),
-		scanTracker: make(map[string]*scanState),
+		logger:       logger,
+		bus:          bus,
+		store:        st,
+		stack:        tcpstack.New(logger),
+		scanTracker:  make(map[string]*scanState),
+		evidenceColl: evidence.NewCollector(),
 	}
 }
 
@@ -131,6 +137,7 @@ func (e *Engine) Init(cfg config.Section) error {
 	// 远程访问蜜罐（按场景选配）
 	sshSrv := sshSvc.New(e.logger)
 	sshSrv.SetBus(e.bus)
+	e.sshSrv = sshSrv
 	ftpSrv := ftpSvc.New(e.logger)
 	ftpSrv.SetBus(e.bus)
 	rdpSrv := rdpSvc.New(e.logger)
@@ -602,6 +609,9 @@ func (e *Engine) onBreadcrumb(remoteIP, path, userAgent string) {
 	// 异步发布 breadcrumb 事件，避免阻塞 TCP 响应
 	e.bus.Publish("honeypot.breadcrumb", evtData)
 	e.bus.Publish("honeypot.attack", evtData)
+
+	// v0.20: 意图分析 + 证据收集
+	e.analyzeAndCollectEvidence(remoteIP, path)
 }
 
 // SetCountermeasureProvider 注册反制 Payload 注入回调
@@ -624,6 +634,55 @@ func (e *Engine) SetDecoyPageProvider(fn httpSvc.DecoyPageCallback) {
 func (e *Engine) SetBaitSystem(gen *bait.Generator, tracker *bait.Tracker) {
 	if e.httpSrv != nil {
 		e.httpSrv.SetBaitSystem(gen, tracker)
+	}
+}
+
+// GetEvidenceCollector 返回证据收集器（供 API 查询使用）
+func (e *Engine) GetEvidenceCollector() *evidence.Collector {
+	return e.evidenceColl
+}
+
+// EnableSSHHighInteraction v0.21: 启用 SSH 高交互 Shell 模式
+// 注入虚拟拓扑、蜜饵联动和证据收集器，并开启完整 SSH 协议握手
+func (e *Engine) EnableSSHHighInteraction(topology *domain.VirtualTopology, linkage *bait.LinkageEngine) {
+	if e.sshSrv == nil {
+		return
+	}
+	e.sshSrv.SetTopology(topology)
+	e.sshSrv.SetBaitLinkage(linkage)
+	e.sshSrv.SetEvidenceCollector(e.evidenceColl)
+	e.sshSrv.EnableShell("192.168.56.20") // jumpbox IP
+	e.logger.Info("SSH high-interaction shell mode enabled")
+}
+
+// analyzeAndCollectEvidence v0.20: 对攻击者输入进行意图分析+证据收集
+func (e *Engine) analyzeAndCollectEvidence(remoteIP, input string) {
+	// 意图分析
+	i := intent.Analyze(input)
+	if i.Category == intent.Unknown {
+		return // 无明确意图，跳过证据收集
+	}
+
+	// 证据收集（per-IP 去重）
+	hits := e.evidenceColl.Check(remoteIP, input)
+	for _, hit := range hits {
+		e.logger.Infow("evidence collected",
+			"remote", remoteIP,
+			"token", hit.Token,
+			"category", hit.Category,
+			"risk", hit.RiskLevel,
+			"intent", i.Category,
+		)
+		// 持久化到 SQLite
+		go e.store.RecordEvidenceHit(
+			remoteIP,
+			string(hit.Token),
+			hit.Category,
+			hit.RiskLevel,
+			input,
+			string(i.Category),
+			i.Confidence,
+		)
 	}
 }
 

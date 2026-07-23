@@ -254,6 +254,21 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_upgrade_jobs_node ON upgrade_jobs(node_id);
 	CREATE INDEX IF NOT EXISTS idx_upgrade_jobs_status ON upgrade_jobs(status);
+
+	-- v0.20: 意图分析 + 证据收集系统
+	CREATE TABLE IF NOT EXISTS evidence_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		remote_ip TEXT NOT NULL,
+		token TEXT NOT NULL,
+		category TEXT DEFAULT '',
+		risk_level TEXT DEFAULT 'low',
+		input_preview TEXT DEFAULT '',
+		intent_category TEXT DEFAULT '',
+		intent_confidence REAL DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_evidence_ip ON evidence_events(remote_ip);
+	CREATE INDEX IF NOT EXISTS idx_evidence_token ON evidence_events(token);
 	`
 	_, err := s.db.Exec(ddl)
 	if err != nil {
@@ -1250,6 +1265,122 @@ func (s *Store) UpdateUpgradeJobStatus(id string, status string, progress float6
 func (s *Store) DeleteUpgradeJob(id string) error {
 	_, err := s.db.Exec("DELETE FROM upgrade_jobs WHERE id = ?", id)
 	return err
+}
+
+// EvidenceEvent 证据收集事件 (v0.20)
+type EvidenceEvent struct {
+	ID               int64   `json:"id"`
+	Timestamp        string  `json:"timestamp"`
+	RemoteIP         string  `json:"remote_ip"`
+	Token            string  `json:"token"`
+	TokenLabel       string  `json:"token_label"`
+	Category         string  `json:"category"`
+	RiskLevel        string  `json:"risk_level"`
+	InputPreview     string  `json:"input_preview"`
+	IntentCategory   string  `json:"intent_category,omitempty"`
+	IntentConfidence float64 `json:"intent_confidence,omitempty"`
+}
+
+// AttackerEvidenceSummary 攻击者证据摘要
+type AttackerEvidenceSummary struct {
+	RemoteIP      string          `json:"remote_ip"`
+	TotalEvidence int             `json:"total_evidence"`
+	LastSeen      string          `json:"last_seen"`
+	TopCategories []EvidenceCount `json:"top_categories"`
+}
+
+// EvidenceCount 证据类别计数
+type EvidenceCount struct {
+	Category string `json:"category"`
+	Count    int    `json:"count"`
+}
+
+// RecordEvidenceHit 记录一次证据命中
+func (s *Store) RecordEvidenceHit(remoteIP, token, category, riskLevel, inputPreview, intentCategory string, intentConfidence float64) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO evidence_events (remote_ip, token, category, risk_level, input_preview, intent_category, intent_confidence)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		remoteIP, token, category, riskLevel, truncateStr(inputPreview, 500), intentCategory, intentConfidence,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetEvidenceByIP 获取指定 IP 的证据列表
+func (s *Store) GetEvidenceByIP(remoteIP string) ([]EvidenceEvent, error) {
+	rows, err := s.db.Query(
+		`SELECT id, timestamp, remote_ip, token, category, risk_level, input_preview, intent_category, intent_confidence
+		 FROM evidence_events WHERE remote_ip = ? ORDER BY timestamp DESC`,
+		remoteIP,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []EvidenceEvent
+	for rows.Next() {
+		var e EvidenceEvent
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.RemoteIP, &e.Token, &e.Category, &e.RiskLevel, &e.InputPreview, &e.IntentCategory, &e.IntentConfidence); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// GetAttackerEvidenceSummaries 获取所有攻击者的证据摘要
+func (s *Store) GetAttackerEvidenceSummaries() ([]AttackerEvidenceSummary, error) {
+	rows, err := s.db.Query(
+		`SELECT remote_ip, COUNT(*) as total, MAX(timestamp) as last_seen
+		 FROM evidence_events GROUP BY remote_ip ORDER BY total DESC LIMIT 20`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []AttackerEvidenceSummary
+	for rows.Next() {
+		var a AttackerEvidenceSummary
+		var lastSeen string
+		if err := rows.Scan(&a.RemoteIP, &a.TotalEvidence, &lastSeen); err != nil {
+			continue
+		}
+		a.LastSeen = lastSeen
+		a.TopCategories = s.topEvidenceCategories(a.RemoteIP)
+		summaries = append(summaries, a)
+	}
+	return summaries, rows.Err()
+}
+
+func (s *Store) topEvidenceCategories(remoteIP string) []EvidenceCount {
+	rows, err := s.db.Query(
+		`SELECT category, COUNT(*) as cnt FROM evidence_events
+		 WHERE remote_ip = ? GROUP BY category ORDER BY cnt DESC LIMIT 5`,
+		remoteIP,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var cats []EvidenceCount
+	for rows.Next() {
+		var ec EvidenceCount
+		if rows.Scan(&ec.Category, &ec.Count) == nil {
+			cats = append(cats, ec)
+		}
+	}
+	return cats
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // Close 关闭数据库连接
