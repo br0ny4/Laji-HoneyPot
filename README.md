@@ -10,7 +10,7 @@
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React" /></a>
   <a href="#一键部署"><img src="https://img.shields.io/badge/deploy-one%20click-green" alt="Deploy" /></a>
                       <!-- BEGIN-AUTO:TESTS -->
-  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-457%2F457%20PASS-brightgreen" alt="Tests" /></a>
+  <a href="https://github.com/br0ny4/Laji-HoneyPot/actions"><img src="https://img.shields.io/badge/tests-33%2F33%20PASS-brightgreen" alt="Tests" /></a>
   <!-- END-AUTO:TESTS -->
                       <!-- BEGIN-AUTO:VERSION -->
   <a href="./internal/core/version.go"><img src="https://img.shields.io/badge/version-0.22.0-blue" alt="Version" /></a>
